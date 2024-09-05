@@ -34,6 +34,7 @@ set(HEADER_LIST
     "${gdstk_SOURCE_DIR}/include/gdstk/gdstk.hpp"
     "${gdstk_SOURCE_DIR}/include/gdstk/gdswriter.hpp"
     "${gdstk_SOURCE_DIR}/include/gdstk/label.hpp"
+    "${gdstk_SOURCE_DIR}/include/gdstk/v4item.hpp"
     "${gdstk_SOURCE_DIR}/include/gdstk/library.hpp"
     "${gdstk_SOURCE_DIR}/include/gdstk/map.hpp"
     "${gdstk_SOURCE_DIR}/include/gdstk/oasis.hpp"
@@ -59,6 +60,7 @@ set(SOURCE_LIST
     flexpath.cpp
     gdsii.cpp
     label.cpp
+    v4item.cpp
     library.cpp
     oasis.cpp
     polygon.cpp
@@ -84,11 +86,11 @@ target_include_directories(gdstk PUBLIC
     $<BUILD_INTERFACE:${gdstk_SOURCE_DIR}/external>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     ${ZLIB_INCLUDE_DIRS}
-    ${Qhull_INCLUDE_DIRS})
+    ${QHULL_INCLUDE_DIRS})
 
 target_link_libraries(gdstk
     ${ZLIB_LIBRARIES}
-    ${Qhull_LIBRARIES}
+    ${QHULL_LIBRARIES}
     clipper)
 
 if(UNIX)

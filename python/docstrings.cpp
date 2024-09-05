@@ -2419,6 +2419,96 @@ PyDoc_STRVAR(label_object_layer_doc, R"!(Label layer.)!");
 
 PyDoc_STRVAR(label_object_texttype_doc, R"!(Label text type.)!");
 
+// V4Item
+
+PyDoc_STRVAR(
+    v4item_object_type_doc,
+    R"!(V4Item(text, origin, anchor="o", rotation=0, magnification=1, x_reflection=False, layer=0, texttype=0)
+
+Text objects with out geometrical information.
+
+V4Item do not create any new geometry in the layout. They can be used to
+add descriptions, flags, or comments to the design. For polygonal text,
+:func:`gdstk.text` should be used instead.
+
+Args:
+    text (str): Text string.
+    origin (coordinate pair or complex): V4Item position.
+    anchor (str): Origin position with respect to the v4item text. One of
+      "n", "s", "e", "w", "o", "ne", "nw", "se", or "sw".
+    rotation: Rotation angle (in radians).
+    magnification: Scaling factor.
+    x_reflection: If ``True``, the v4item is reflected across the
+      horizontal axis before rotation.
+    layer: layer number assigned to this v4item.
+    texttype: text type number assigned to this v4item.
+
+Examples:
+    >>> frame = gdstk.rectangle((-2, -1), (2, 1), datatype=1)
+    >>> v4item_o = gdstk.V4Item("Center", (0, 0), rotation=numpy.pi / 6)
+    >>> v4item_n = gdstk.V4Item("North", (0, 1), "n")
+    >>> v4item_s = gdstk.V4Item("South", (0, -1), "s")
+    >>> v4item_e = gdstk.V4Item("East", (2, 0), "e")
+    >>> v4item_w = gdstk.V4Item("West", (-2, 0), "w")
+    >>> v4item_ne = gdstk.V4Item("Northeast", (2, 1), "ne")
+    >>> v4item_se = gdstk.V4Item("Southeast", (2, -1), "se")
+    >>> v4item_nw = gdstk.V4Item("Northwest", (-2, 1), "nw")
+    >>> v4item_sw = gdstk.V4Item("Southwest", (-2, -1), "sw")
+
+    .. image:: ../v4item/init.svg
+       :align: center
+
+    Note that this example can only be correctly displayed in browsers
+    with good support for text alignment in SVG images.
+
+Notes:
+    V4Item anchor and transformations (rotation, magnification and
+    reflection) are not supported by the OASIS format.)!");
+
+
+PyDoc_STRVAR(v4item_object_copy_doc, R"!(copy() -> gdstk.V4Item
+
+Create a copy this v4item.
+
+Returns:
+    Copy of this v4item.)!");
+
+PyDoc_STRVAR(v4item_object_deepcopy_doc, R"!(__deepcopy()__ -> gdstk.V4Item
+
+Create a copy this v4item.
+
+Args:
+    memo: Dict used internally by the deepcopy function.
+
+Returns:
+    Copy of this v4item.)!");
+
+PyDoc_STRVAR(v4item_object_apply_repetition_doc, R"!(apply_repetition() -> list
+
+Create new v4items based on this object's ``repetition`` attribute.
+
+After the repetition is applied, the original attribute is set to
+``None``.
+
+Returns:
+    Newly created objects.)!");
+
+PyDoc_STRVAR(v4item_object_text_doc, R"!(V4Item text.)!");
+
+PyDoc_STRVAR(v4item_object_origin_doc, R"!(V4Item origin.)!");
+
+PyDoc_STRVAR(v4item_object_anchor_doc, R"!(V4Item anchor.)!");
+
+PyDoc_STRVAR(v4item_object_rotation_doc, R"!(V4Item rotation angle.)!");
+
+PyDoc_STRVAR(v4item_object_magnification_doc, R"!(V4Item scaling factor.)!");
+
+PyDoc_STRVAR(v4item_object_x_reflection_doc, R"!(V4Item reflection across the x axis.)!");
+
+PyDoc_STRVAR(v4item_object_layer_doc, R"!(V4Item layer.)!");
+
+PyDoc_STRVAR(v4item_object_texttype_doc, R"!(V4Item text type.)!");
+
 // Cell
 
 PyDoc_STRVAR(cell_object_type_doc, R"!(Cell(name)
@@ -2967,6 +3057,10 @@ PyDoc_STRVAR(library_object_name_doc, R"!(Library name.)!");
 PyDoc_STRVAR(library_object_unit_doc, R"!(Library unit.)!");
 PyDoc_STRVAR(library_object_precision_doc, R"!(Library precision.)!");
 PyDoc_STRVAR(library_object_cells_doc, R"!(List of library cells.
+
+Notes:
+    This attribute is read-only.)!");
+PyDoc_STRVAR(library_object_v4items_doc, R"!(List of library v4items.
 
 Notes:
     This attribute is read-only.)!");
@@ -3559,6 +3653,25 @@ Returns:
 
 Examples:
     >>> library = gdstk.read_oas("layout.oas")
+    >>> top_cells = library.top_level())!");
+
+PyDoc_STRVAR(read_oas_v4d_function_doc, R"!(read_oas_v4d(infile, unit=0, tolerance=0) -> gdstk.Library
+
+Import a library from an OASIS stream file.
+
+Args:
+    infile (str or pathlib.Path): Name of the input file.
+    unit (number): If greater than zero, convert the imported geometry
+      to the this unit.
+    tolerance (number): Default tolerance for loaded paths and round
+      shapes.  If zero or negative, the library rounding size is used
+      (`precision / unit`).
+
+Returns:
+    The imported library.
+
+Examples:
+    >>> library = gdstk.read_oas_v4d("layout.oas")
     >>> top_cells = library.top_level())!");
 
 PyDoc_STRVAR(read_rawcells_function_doc, R"!(read_rawcells(infile) -> dict

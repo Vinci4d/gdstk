@@ -20,6 +20,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <gdstk/flexpath.hpp>
 #include <gdstk/gdsii.hpp>
 #include <gdstk/label.hpp>
+#include <gdstk/v4item.hpp>
 #include <gdstk/library.hpp>
 #include <gdstk/map.hpp>
 #include <gdstk/oasis.hpp>
@@ -1344,9 +1345,35 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
     return Library{};
 }
 
-// TODO: verify modal variables are correctly updated
 Library read_oas(const char* filename, double unit, double tolerance, ErrorCode* error_code) {
     Library library = {};
+    return library;
+}
+
+// TODO: verify modal variables are correctly updated
+Library read_oas_v4d(const char* filename, double unit, double tolerance, ErrorCode* error_code) {
+    Library library = {};
+
+    //printf("read_oas_v4d : 1\n");
+
+    V4Item *v4item0 = (V4Item*)allocate_clear(sizeof(V4Item));
+    V4Item *v4item1 = (V4Item*)allocate_clear(sizeof(V4Item));
+    {
+        for(int i=0; i<128; i++) {
+            v4item0->arr0.append(i*0.1);
+            v4item0->arr1.append(i*0.1);
+        }
+        v4item0->text = copy_string("item 0", NULL);
+        library.v4item_array.append(v4item0);
+
+        v4item1->text = copy_string("item 1", NULL);
+        library.v4item_array.append(v4item1);
+
+        Label *label = (Label*)allocate_clear(sizeof(Label));
+        static char test_label_str[] = "hello hello label";
+        label->text = copy_string(test_label_str, NULL);
+        library.label_array.append(label);
+    }
 
     OasisStream in = {};
     in.file = fopen(filename, "rb");
@@ -1436,56 +1463,60 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
     // Elements
     Cell* cell = NULL;
 
-    // const char* oasis_record_names[] = {"PAD",
-    //                                     "START",
-    //                                     "END",
-    //                                     "CELLNAME_IMPLICIT",
-    //                                     "CELLNAME",
-    //                                     "TEXTSTRING_IMPLICIT",
-    //                                     "TEXTSTRING",
-    //                                     "PROPNAME_IMPLICIT",
-    //                                     "PROPNAME",
-    //                                     "PROPSTRING_IMPLICIT",
-    //                                     "PROPSTRING",
-    //                                     "LAYERNAME_DATA",
-    //                                     "LAYERNAME_TEXT",
-    //                                     "CELL_REF_NUM",
-    //                                     "CELL",
-    //                                     "XYABSOLUTE",
-    //                                     "XYRELATIVE",
-    //                                     "PLACEMENT",
-    //                                     "PLACEMENT_TRANSFORM",
-    //                                     "TEXT",
-    //                                     "RECTANGLE",
-    //                                     "POLYGON",
-    //                                     "PATH",
-    //                                     "TRAPEZOID_AB",
-    //                                     "TRAPEZOID_A",
-    //                                     "TRAPEZOID_B",
-    //                                     "CTRAPEZOID",
-    //                                     "CIRCLE",
-    //                                     "PROPERTY",
-    //                                     "LAST_PROPERTY",
-    //                                     "XNAME_IMPLICIT",
-    //                                     "XNAME",
-    //                                     "XELEMENT",
-    //                                     "XGEOMETRY",
-    //                                     "CBLOCK"};
+    const char* oasis_record_names[] = {
+        "PAD",                          //  0
+        "START",                        //  1
+        "END",                          //  2
+        "CELLNAME_IMPLICIT",            //  3
+        "CELLNAME",                     //  4
+        "TEXTSTRING_IMPLICIT",          //  5
+        "TEXTSTRING",                   //  6
+        "PROPNAME_IMPLICIT",            //  7
+        "PROPNAME",                     //  8
+        "PROPSTRING_IMPLICIT",          //  9
+        "PROPSTRING",                   // 10
+        "LAYERNAME_DATA",               // 11
+        "LAYERNAME_TEXT",               // 12
+        "CELL_REF_NUM",                 // 13
+        "CELL",                         // 14
+        "XYABSOLUTE",                   // 15
+        "XYRELATIVE",                   // 16
+        "PLACEMENT",                    // 17
+        "PLACEMENT_TRANSFORM",          // 18
+        "TEXT",                         // 19
+        "RECTANGLE",                    // 20
+        "POLYGON",                      // 21
+        "PATH",                         // 22
+        "TRAPEZOID_AB",                 // 23
+        "TRAPEZOID_A",                  // 24
+        "TRAPEZOID_B",                  // 25
+        "CTRAPEZOID",                   // 26
+        "CIRCLE",                       // 27
+        "PROPERTY",                     // 28
+        "LAST_PROPERTY",                // 29
+        "XNAME_IMPLICIT",               // 30
+        "XNAME",                        // 31
+        "XELEMENT",                     // 32
+        "XGEOMETRY",                    // 33
+        "CBLOCK",                       // 34
+    };
 
     OasisRecord record;
     while ((error_code == NULL || *error_code == ErrorCode::NoError) &&
            oasis_read(&record, 1, 1, in) == ErrorCode::NoError) {
-        // DEBUG_PRINT("Record [%02u] %s\n", (uint8_t)record,
-        //             (uint8_t)record < COUNT(oasis_record_names)
-        //                 ? oasis_record_names[(uint8_t)record]
-        //                 : "---");
+
+        if(int(record) != 20 && int(record) != 21) {
+            printf("Record [%02u] %s:", (uint8_t)record,
+                                         (uint8_t)record < COUNT(oasis_record_names) ? oasis_record_names[(uint8_t)record] : "---");
+        }
+
         switch (record) {
             case OasisRecord::PAD:
                 break;
             case OasisRecord::START:
                 // START is parsed before this loop
                 if (error_logger)
-                    fputs("[GDSTK] Unexpected START record out of position in file.\n",
+                    fputs("[GDSTK] Unexpected START record out of position in file.",
                           error_logger);
                 if (error_code) *error_code = ErrorCode::InvalidFile;
                 break;
@@ -1662,18 +1693,43 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 property_value_table[ref_number] = ByteArray{len, bytes, NULL};
                 next_property = &property_value_table[ref_number].properties;
             } break;
-            case OasisRecord::LAYERNAME_DATA:
-            case OasisRecord::LAYERNAME_TEXT:
-                // Unused record
-                free_allocation(oasis_read_string(in, false, len));
+            case OasisRecord::LAYERNAME_DATA: {
+                uint8_t* bytes = oasis_read_string(in, false, len);
+                int layer_number = -1;
                 for (uint32_t i = 2; i > 0; i--) {
                     uint64_t type = oasis_read_unsigned_integer(in);
                     if (type > 0) {
-                        if (type == 4) oasis_read_unsigned_integer(in);
-                        oasis_read_unsigned_integer(in);
+                        if (type == 4) {
+                            oasis_read_unsigned_integer(in);
+                        }
+                        uint64_t u = oasis_read_unsigned_integer(in);
+                        if(i==2) {
+                            layer_number = int(u);
+                        }
                     }
                 }
-                break;
+                std::string layer_name{(const char*)bytes, len};
+                v4item0->layer_names.push_back(layer_name);
+                v4item0->layer_numbers.push_back(layer_number);
+                free_allocation(bytes);
+            }   break;
+            case OasisRecord::LAYERNAME_TEXT: {
+                uint8_t* bytes = oasis_read_string(in, false, len);
+                for (uint32_t i = 2; i > 0; i--) {
+                    uint64_t type = oasis_read_unsigned_integer(in);
+                    printf("    i = %d, type = %d,", i, (int)type);
+                    if (type > 0) {
+                        if (type == 4) {
+                            uint64_t u = oasis_read_unsigned_integer(in);
+                            printf("        %d,", (int)u);
+                        }
+                        uint64_t u = oasis_read_unsigned_integer(in);
+                        printf("        %d,", (int)u);
+                    }
+                }
+                printf("    bytes=%s\n", (char*)bytes);
+                free_allocation(bytes);
+            }   break;
             case OasisRecord::CELL_REF_NUM:
             case OasisRecord::CELL: {
                 cell = (Cell*)allocate_clear(sizeof(Cell));

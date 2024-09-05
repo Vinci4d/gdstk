@@ -16,6 +16,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 
 #include "flexpath.hpp"
 #include "label.hpp"
+#include "v4item.hpp"
 #include "polygon.hpp"
 #include "property.hpp"
 #include "robustpath.hpp"

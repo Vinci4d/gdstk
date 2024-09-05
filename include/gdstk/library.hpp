@@ -36,6 +36,8 @@ struct Library {
     // does NOT enforce it.
     Array<Cell*> cell_array;
     Array<RawCell*> rawcell_array;
+    Array<V4Item*> v4item_array;
+    Array<Label*> label_array;
 
     Property* properties;
 
@@ -173,6 +175,10 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
 // empty, only shapes in those tags will be imported.  If not NULL, any errors
 // will be reported through error_code.
 Library read_oas(const char* filename, double unit,
+                 double tolerance,  // TODO: const Set<Tag>* shape_tags,
+                 ErrorCode* error_code);
+
+Library read_oas_v4d(const char* filename, double unit,
                  double tolerance,  // TODO: const Set<Tag>* shape_tags,
                  ErrorCode* error_code);
 

@@ -590,6 +590,41 @@ PyObject* library_object_get_cells(LibraryObject* self, void*) {
     return result;
 }
 
+PyObject* library_object_get_v4items(LibraryObject* self, void*) {
+    Array<V4Item*>* v4item_array = &self->library->v4item_array;
+    const uint64_t count = v4item_array->count;
+    PyObject* result = PyList_New(count);
+    if (!result) {
+        PyErr_SetString(PyExc_RuntimeError, "Unable to create list.");
+        return NULL;
+    }
+    uint64_t i = 0;
+    for (V4Item** v4item = v4item_array->items; i < v4item_array->count; i++, v4item++) {
+        PyObject* v4item_obj = (PyObject*)(*v4item)->owner;
+        Py_INCREF(v4item_obj);
+        PyList_SET_ITEM(result, i, v4item_obj);
+    }
+    return result;
+}
+
+
+PyObject* library_object_get_labels(LibraryObject* self, void*) {
+    Array<Label*>* label_array = &self->library->label_array;
+    const uint64_t count = label_array->count;
+    PyObject* result = PyList_New(count);
+    if (!result) {
+        PyErr_SetString(PyExc_RuntimeError, "Unable to create list.");
+        return NULL;
+    }
+    uint64_t i = 0;
+    for (Label** label = label_array->items; i < label_array->count; i++, label++) {
+        PyObject* label_obj = (PyObject*)(*label)->owner;
+        Py_INCREF(label_obj);
+        PyList_SET_ITEM(result, i, label_obj);
+    }
+    return result;
+}
+
 static PyObject* library_object_get_properties(LibraryObject* self, void*) {
     return build_properties(self->library->properties);
 }
@@ -599,15 +634,13 @@ int library_object_set_properties(LibraryObject* self, PyObject* arg, void*) {
 }
 
 static PyGetSetDef library_object_getset[] = {
-    {"name", (getter)library_object_get_name, (setter)library_object_set_name,
-     library_object_name_doc, NULL},
-    {"unit", (getter)library_object_get_unit, (setter)library_object_set_unit,
-     library_object_unit_doc, NULL},
-    {"precision", (getter)library_object_get_precision, (setter)library_object_set_precision,
-     library_object_precision_doc, NULL},
-    {"cells", (getter)library_object_get_cells, NULL, library_object_cells_doc, NULL},
-    {"properties", (getter)library_object_get_properties, (setter)library_object_set_properties,
-     object_properties_doc, NULL},
+    {"name",       (getter)library_object_get_name,       (setter)library_object_set_name,       library_object_name_doc,      NULL},
+    {"unit",       (getter)library_object_get_unit,       (setter)library_object_set_unit,       library_object_unit_doc,      NULL},
+    {"precision",  (getter)library_object_get_precision,  (setter)library_object_set_precision,  library_object_precision_doc, NULL},
+    {"cells",      (getter)library_object_get_cells,      NULL,                                  library_object_cells_doc,     NULL},
+    {"v4items",    (getter)library_object_get_v4items,    NULL,                                  library_object_v4items_doc,   NULL},
+    {"labels",     (getter)library_object_get_labels,     NULL,                                  library_object_v4items_doc,   NULL},
+    {"properties", (getter)library_object_get_properties, (setter)library_object_set_properties, object_properties_doc,        NULL},
     {NULL}};
 
 Py_ssize_t library_object_len(LibraryObject* self) {

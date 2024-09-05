@@ -26,6 +26,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #define RaithDataObject_Check(o) PyObject_TypeCheck((o), &raithdata_object_type)
 #define FlexPathObject_Check(o) PyObject_TypeCheck((o), &flexpath_object_type)
 #define LabelObject_Check(o) PyObject_TypeCheck((o), &label_object_type)
+#define V4ItemObject_Check(o) PyObject_TypeCheck((o), &v4item_object_type)
 #define LibraryObject_Check(o) PyObject_TypeCheck((o), &library_object_type)
 #define GdsWriterObject_Check(o) PyObject_TypeCheck((o), &gdswriter_object_type)
 #define PolygonObject_Check(o) PyObject_TypeCheck((o), &polygon_object_type)
@@ -135,6 +136,11 @@ struct RobustPathObject {
 struct LabelObject {
     PyObject_HEAD;
     Label* label;
+};
+
+struct V4ItemObject {
+    PyObject_HEAD;
+    V4Item* v4item;
 };
 
 struct CellObject {
@@ -387,6 +393,47 @@ static PyTypeObject label_object_type = {PyVarObject_HEAD_INIT(NULL, 0) "gdstk.L
                                          0,
                                          Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
                                          label_object_type_doc,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         PyType_GenericNew,
+                                         0,
+                                         0};
+
+
+static PyTypeObject v4item_object_type = {PyVarObject_HEAD_INIT(NULL, 0) "gdstk.V4Item",
+                                         sizeof(V4ItemObject),
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+                                         v4item_object_type_doc,
                                          0,
                                          0,
                                          0,
@@ -790,6 +837,7 @@ static Array<Vec2> custom_bend_function(double radius, double initial_angle, dou
 #include "flexpath_object.cpp"
 #include "gdswriter_object.cpp"
 #include "label_object.cpp"
+#include "v4item_object.cpp"
 #include "library_object.cpp"
 #include "polygon_object.cpp"
 #include "raithdata_object.cpp"
@@ -1439,6 +1487,24 @@ static PyObject* create_library_objects(Library* library) {
     result->library = library;
     library->owner = result;
 
+    {
+        V4Item** v4item = library->v4item_array.items;
+        for (uint64_t i = 0; i < library->v4item_array.count; i++, v4item++) {
+            V4ItemObject* v4item_obj = PyObject_New(V4ItemObject, &v4item_object_type);
+            v4item_obj = (V4ItemObject*)PyObject_Init((PyObject*)v4item_obj, &v4item_object_type);
+            v4item_obj->v4item = *v4item;
+            v4item_obj->v4item->owner = v4item_obj;
+        }
+
+        Label** label = library->label_array.items;
+        for (uint64_t i = 0; i < library->label_array.count; i++, label++) {
+            LabelObject* label_obj = PyObject_New(LabelObject, &label_object_type);
+            label_obj = (LabelObject*)PyObject_Init((PyObject*)label_obj, &label_object_type);
+            label_obj->label = *label;
+            label_obj->label->owner = label_obj;
+        }
+    }
+
     Cell** cell = library->cell_array.items;
     for (uint64_t i = 0; i < library->cell_array.count; i++, cell++) {
         CellObject* cell_obj = PyObject_New(CellObject, &cell_object_type);
@@ -1556,6 +1622,30 @@ static PyObject* read_oas_function(PyObject* mod, PyObject* args, PyObject* kwds
     Library* library = (Library*)allocate_clear(sizeof(Library));
     ErrorCode error_code = ErrorCode::NoError;
     *library = read_oas(filename, unit, tolerance, &error_code);
+    Py_DECREF(pybytes);
+
+    if (return_error(error_code)) {
+        library->free_all();
+        free_allocation(library);
+        return NULL;
+    }
+
+    return create_library_objects(library);
+}
+
+static PyObject* read_oas_v4d_function(PyObject* mod, PyObject* args, PyObject* kwds) {
+    PyObject* pybytes = NULL;
+    double unit = 0;
+    double tolerance = 0;
+    const char* keywords[] = {"infile", "unit", "tolerance", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O&|dd:read_oas_v4d", (char**)keywords,
+                                     PyUnicode_FSConverter, &pybytes, &unit, &tolerance))
+        return NULL;
+
+    const char* filename = PyBytes_AS_STRING(pybytes);
+    Library* library = (Library*)allocate_clear(sizeof(Library));
+    ErrorCode error_code = ErrorCode::NoError;
+    *library = read_oas_v4d(filename, unit, tolerance, &error_code);
     Py_DECREF(pybytes);
 
     if (return_error(error_code)) {
@@ -1883,6 +1973,8 @@ static PyMethodDef gdstk_methods[] = {
      read_gds_function_doc},
     {"read_oas", (PyCFunction)read_oas_function, METH_VARARGS | METH_KEYWORDS,
      read_oas_function_doc},
+    {"read_oas_v4d", (PyCFunction)read_oas_v4d_function, METH_VARARGS | METH_KEYWORDS,
+     read_oas_v4d_function_doc},
     {"read_rawcells", (PyCFunction)read_rawcells_function, METH_VARARGS,
      read_rawcells_function_doc},
     {"gds_units", (PyCFunction)gds_units_function, METH_VARARGS, gds_units_function_doc},
@@ -1941,6 +2033,12 @@ static int gdstk_exec(PyObject* module) {
     label_object_type.tp_methods = label_object_methods;
     label_object_type.tp_getset = label_object_getset;
     label_object_type.tp_str = (reprfunc)label_object_str;
+
+    v4item_object_type.tp_dealloc = (destructor)v4item_object_dealloc;
+    v4item_object_type.tp_init = (initproc)v4item_object_init;
+    v4item_object_type.tp_methods = v4item_object_methods;
+    v4item_object_type.tp_getset = v4item_object_getset;
+    v4item_object_type.tp_str = (reprfunc)v4item_object_str;
 
     cell_object_type.tp_dealloc = (destructor)cell_object_dealloc;
     cell_object_type.tp_init = (initproc)cell_object_init;
