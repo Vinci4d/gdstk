@@ -436,6 +436,26 @@ void Polygon::apply_repetition(Array<Polygon*>& result) {
     return;
 }
 
+void Polygon::apply_repetition_no_clear(Array<Polygon*>& result) const {
+    if (repetition.type == RepetitionType::None) return;
+
+    Array<Vec2> offsets = {};
+    repetition.get_offsets(offsets);
+
+    // Skip first offset (0, 0)
+    Vec2* offset_p = offsets.items + 1;
+    result.ensure_slots(offsets.count - 1);
+    for (uint64_t offset_count = offsets.count - 1; offset_count > 0; offset_count--) {
+        Polygon* poly = (Polygon*)allocate_clear(sizeof(Polygon));
+        poly->copy_from(*this);
+        poly->translate(*offset_p++);
+        result.append_unsafe(poly);
+    }
+
+    offsets.clear();
+    return;
+}
+
 ErrorCode Polygon::to_gds(FILE* out, double scaling) const {
     ErrorCode error_code = ErrorCode::NoError;
     if (point_array.count < 3) return error_code;

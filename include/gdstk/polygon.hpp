@@ -85,6 +85,7 @@ struct Polygon {
 
     // Append the copies of this polygon defined by its repetition to result.
     void apply_repetition(Array<Polygon*>& result);
+    void apply_repetition_no_clear(Array<Polygon*>& result) const;
 
     // These functions output the polygon in the GDSII, OASIS and SVG formats.
     // They are not supposed to be called by the user.
