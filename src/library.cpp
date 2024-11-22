@@ -1477,6 +1477,8 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
     //                                     "XGEOMETRY",
     //                                     "CBLOCK"};
 
+    std::vector<int> record_counts(35,0);
+
     OasisRecord record;
     while ((error_code == NULL || *error_code == ErrorCode::NoError) &&
            oasis_read(&record, 1, 1, in) == ErrorCode::NoError) {
@@ -1484,6 +1486,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
         //             (uint8_t)record < COUNT(oasis_record_names)
         //                 ? oasis_record_names[(uint8_t)record]
         //                 : "---");
+        record_counts[(int)record]++;
         switch (record) {
             case OasisRecord::PAD:
                 break;
@@ -2559,8 +2562,54 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
     }
     if (in.error_code != ErrorCode::NoError && error_code) *error_code = in.error_code;
 
+
 CLEANUP:
     fclose(in.file);
+
+    if(1) {
+        const std::vector<std::string> record_names = {
+            "PAD",                  //  0
+            "START",                //  1
+            "END",                  //  2
+            "CELLNAME_IMPLICIT",    //  3
+            "CELLNAME",             //  4
+            "TEXTSTRING_IMPLICIT",  //  5
+            "TEXTSTRING",           //  6
+            "PROPNAME_IMPLICIT",    //  7
+            "PROPNAME",             //  8
+            "PROPSTRING_IMPLICIT",  //  9
+            "PROPSTRING",           // 10
+            "LAYERNAME_DATA",       // 11
+            "LAYERNAME_TEXT",       // 12
+            "CELL_REF_NUM",         // 13
+            "CELL",                 // 14
+            "XYABSOLUTE",           // 15
+            "XYRELATIVE",           // 16
+            "PLACEMENT",            // 17
+            "PLACEMENT_TRANSFORM",  // 18
+            "TEXT",                 // 19
+            "RECTANGLE",            // 20
+            "POLYGON",              // 21
+            "PATH",                 // 22
+            "TRAPEZOID_AB",         // 23
+            "TRAPEZOID_A",          // 24
+            "TRAPEZOID_B",          // 25
+            "CTRAPEZOID",           // 26
+            "CIRCLE",               // 27
+            "PROPERTY",             // 28
+            "LAST_PROPERTY",        // 29
+            "XNAME_IMPLICIT",       // 30
+            "XNAME",                // 31
+            "XELEMENT",             // 32
+            "XGEOMETRY",            // 33
+            "CBLOCK"                // 34
+        };
+
+        printf("Record counts:\n");
+        for(size_t i=0; i<record_counts.size(); i++) {
+            printf("   %02d==%32s: %8d\n", (int)i, record_names[i].c_str(), record_counts[i]);
+        }
+    }
 
     ByteArray* ba = cell_name_table.items;
     for (uint64_t i = cell_name_table.count; i > 0; i--, ba++) {

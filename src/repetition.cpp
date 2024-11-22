@@ -79,6 +79,34 @@ void Repetition::copy_from(const Repetition repetition) {
     }
 }
 
+// copy overwiting/discarding whatever is
+void Repetition::overwrite_copy_from(const Repetition repetition)
+{
+    type = repetition.type;
+    switch (type) {
+        case RepetitionType::Rectangular:
+            columns = repetition.columns;
+            rows = repetition.rows;
+            spacing = repetition.spacing;
+            break;
+        case RepetitionType::Regular:
+            columns = repetition.columns;
+            rows = repetition.rows;
+            v1 = repetition.v1;
+            v2 = repetition.v2;
+            break;
+        case RepetitionType::Explicit:
+            offsets.overwrite_copy_from(repetition.offsets);
+            break;
+        case RepetitionType::ExplicitX:
+        case RepetitionType::ExplicitY:
+            coords.overwrite_copy_from(repetition.coords);
+            break;
+        case RepetitionType::None:
+            return;
+    }
+}
+
 uint64_t Repetition::get_count() const {
     switch (type) {
         case RepetitionType::Rectangular:

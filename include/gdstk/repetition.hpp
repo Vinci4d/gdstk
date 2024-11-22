@@ -51,6 +51,7 @@ struct Repetition {
 
     // This repetition instance must be zeroed before copy_from
     void copy_from(const Repetition repetition);
+    void overwrite_copy_from(const Repetition repetition);
 
     // Return the number of repetitions created by this object, including the
     // original

@@ -413,6 +413,58 @@ void Cell::get_polygons(bool apply_repetitions, bool include_paths, int64_t dept
     }
 }
 
+void Cell::get_polygons_callback(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
+                    Tag tag, std::function<void(const Polygon*)> callback, int64_t *count) const
+{
+    if (filter) {
+        for (uint64_t i = 0; i < polygon_array.count; i++) {
+            Polygon* psrc = polygon_array[i];
+            if (psrc->tag != tag) continue;
+            if(count) {
+                count[0] ++;
+            }
+            callback(psrc);
+        }
+    } else {
+        if(count) {
+            count[0] += polygon_array.count;
+        }
+        for (uint64_t i = 0; i < polygon_array.count; i++) {
+            callback(polygon_array[i]);
+        }
+    }
+
+    if (include_paths) {
+        Array<Polygon*> poly_array = {};
+        FlexPath** flexpath = flexpath_array.items;
+        for (uint64_t i = 0; i < flexpath_array.count; i++, flexpath++) {
+            // NOTE: return ErrorCode ignored here
+            (*flexpath)->to_polygons(filter, tag, poly_array);
+        }
+
+        RobustPath** robustpath = robustpath_array.items;
+        for (uint64_t i = 0; i < robustpath_array.count; i++, robustpath++) {
+            // NOTE: return ErrorCode ignored here
+            (*robustpath)->to_polygons(filter, tag, poly_array);
+        }
+
+        if(count) {
+            count[0] += poly_array.count;
+        }
+        for(uint64_t i=0; i<poly_array.count; i++) {
+            callback(poly_array[i]);
+        }
+    }
+
+    if (depth != 0) {
+        Reference** ref = reference_array.items;
+        for (uint64_t i = 0; i < reference_array.count; i++, ref++) {
+            (*ref)->get_polygons_callback(apply_repetitions, include_paths, depth > 0 ? depth - 1 : -1,
+                                 filter, tag, callback, count);
+        }
+    }
+}
+
 void Cell::get_flexpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,
                          Array<FlexPath*>& result) const {
     uint64_t start = result.count;

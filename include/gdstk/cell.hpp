@@ -14,6 +14,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+#include <functional>
 
 #include "array.hpp"
 #include "flexpath.hpp"
@@ -139,6 +140,9 @@ struct Cell {
     // is true, only polygons with the indicated tag are appended.
     void get_polygons(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
                       Tag tag, Array<Polygon*>& result) const;
+
+    void get_polygons_callback(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
+                      Tag tag, std::function<void(const Polygon*)> callback, int64_t *count) const;
 
     // Similar to get_polygons, but for paths and labels.
     void get_flexpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,

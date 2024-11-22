@@ -254,6 +254,59 @@ void Reference::get_polygons(bool apply_repetitions, bool include_paths, int64_t
     if (repetition.type != RepetitionType::None) offsets.clear();
 }
 
+// Depth is passed as-is to Cell::get_polygons, where it is inspected and applied.
+void Reference::get_polygons_callback(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
+                             Tag tag, std::function<void(const Polygon*)> callback, int64_t *count) const {
+    if (type != ReferenceType::Cell) return;
+
+    Vec2 zero = {0, 0};
+    Array<Vec2> offsets = {};
+    if (repetition.type != RepetitionType::None) {
+        repetition.get_offsets(offsets);
+    } else {
+        offsets.count = 1;
+        offsets.items = &zero;
+    }
+
+    Polygon* dst = (Polygon*)allocate_clear(sizeof(Polygon));
+    cell->get_polygons_callback(apply_repetitions, include_paths, depth, filter, tag, 
+        [&](const Polygon* src) {
+            if(count) {
+                count[0]++;
+            }
+            callback(src);
+            Vec2* offset_p = offsets.items;
+            for (uint64_t offset_count = offsets.count; offset_count > 0; offset_count--) {
+                if(count) {
+                    count[0]++;
+                    callback(src);  // dummy
+                } else {
+                    if(1) {
+                        dst->copy_from(*src);
+                        dst->transform(magnification, x_reflection, rotation, origin + *offset_p++);
+                        callback(dst);
+                        dst->point_array.clear();
+                        dst->repetition.clear();
+                        free_allocation(dst->properties);
+                    } else {
+                        dst->tag = src->tag;
+                        dst->point_array.overwrite_copy_from(src->point_array);
+                        dst->repetition.overwrite_copy_from(src->repetition);
+                        dst->properties = properties_copy(src->properties);
+                        dst->transform(magnification, x_reflection, rotation, origin + *offset_p++);
+                        callback(dst);
+                        free_allocation(dst->properties);
+                    }
+                }
+            }
+        },
+        nullptr // call this callback
+    );
+
+    free_allocation(dst);
+    if (repetition.type != RepetitionType::None) offsets.clear();
+}
+
 void Reference::get_flexpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,
                               Array<FlexPath*>& result) const {
     if (type != ReferenceType::Cell) return;

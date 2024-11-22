@@ -107,6 +107,8 @@ struct Reference {
     // created.
     void get_polygons(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
                       Tag tag, Array<Polygon*>& result) const;
+    void get_polygons_callback(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
+                      Tag tag, std::function<void(const Polygon*)> callback, int64_t *count) const;
     void get_flexpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,
                        Array<FlexPath*>& result) const;
     void get_robustpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,

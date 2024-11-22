@@ -135,6 +135,18 @@ struct Array {
             items = NULL;
         }
     }
+
+    void overwrite_copy_from(const Array<T>& src)
+    {
+        if(capacity != src.count) {
+            copy_from(src);
+        } else {
+            count = src.count;
+            if (count > 0) {
+                memcpy(items, src.items, sizeof(items[0]) * count);
+            }
+        }
+    }
 };
 
 template <>
