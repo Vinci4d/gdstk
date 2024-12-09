@@ -14,6 +14,8 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <stdint.h>
 #include <stdio.h>
 
+#include <memory>
+
 #include "flexpath.hpp"
 #include "label.hpp"
 #include "polygon.hpp"
@@ -109,6 +111,9 @@ struct Reference {
                       Tag tag, Array<Polygon*>& result) const;
     void get_polygons_callback(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
                       Tag tag, std::function<void(const Polygon*)> callback, int64_t *count) const;
+    void build_polygon_tree(std::shared_ptr<OffsetPolyTree> node, 
+                      int64_t depth, bool filter, Tag tag, bool verbose=false) const;
+
     void get_flexpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,
                        Array<FlexPath*>& result) const;
     void get_robustpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,

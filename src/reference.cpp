@@ -254,6 +254,37 @@ void Reference::get_polygons(bool apply_repetitions, bool include_paths, int64_t
     if (repetition.type != RepetitionType::None) offsets.clear();
 }
 
+void Reference::build_polygon_tree(std::shared_ptr<OffsetPolyTree> node, 
+                    int64_t depth, bool filter, Tag tag, bool verbose) const {
+    if (type != ReferenceType::Cell) return;
+
+    if(verbose) {
+        printf("    [%3d] Ref =%16p\n", (int)depth, this);
+    }
+
+    cell->build_polygon_tree(node, depth+1, filter, tag, verbose);
+
+    node->ref_node = true;
+    node->ref_node_magnification = magnification;
+    node->ref_node_x_reflection  = x_reflection;
+    node->ref_node_rotation      = rotation;
+    node->ref_node_origin[0]     = origin.x;
+    node->ref_node_origin[1]     = origin.y;
+
+    if (repetition.type != RepetitionType::None) {
+        Array<Vec2> offsets = {};
+        repetition.get_offsets(offsets);
+
+        node->offsets.resize(offsets.count*2);
+        for (uint64_t i = 0; i < offsets.count; i++) {
+            node->offsets[i*2+0] = offsets.items[i].x;
+            node->offsets[i*2+1] = offsets.items[i].y;
+        }
+
+        offsets.clear();
+    }
+}
+
 // Depth is passed as-is to Cell::get_polygons, where it is inspected and applied.
 void Reference::get_polygons_callback(bool apply_repetitions, bool include_paths, int64_t depth, bool filter,
                              Tag tag, std::function<void(const Polygon*)> callback, int64_t *count) const {

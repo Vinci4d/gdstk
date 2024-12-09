@@ -14,6 +14,10 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <stdint.h>
 #include <stdio.h>
 
+#include <vector>
+#include <memory>
+#include <string>
+
 #include "array.hpp"
 #include "oasis.hpp"
 #include "property.hpp"
@@ -135,6 +139,74 @@ ErrorCode contour(const double* data, uint64_t rows, uint64_t cols, double level
 void inside(const Array<Vec2>& points, const Array<Polygon*>& polygons, bool* result);
 bool all_inside(const Array<Vec2>& points, const Array<Polygon*>& polygons);
 bool any_inside(const Array<Vec2>& points, const Array<Polygon*>& polygons);
+
+// intermediate tree, built from Cell::build_polygon_tree, Reference::build_polygon_tree
+struct OffsetPolyTree
+{
+    int depth = 0;
+    
+    struct OffsettedPolys {
+        uint64_t tag;       // datatype, layer_number
+        std::vector<double> points;
+        std::vector<double> offsets;
+
+        void copy(Polygon *polygon) {
+            tag = polygon->tag;
+            points.resize(polygon->point_array.count*2);
+            for(uint64_t i=0; i<polygon->point_array.count; i++) {
+                points[i*2  ] = polygon->point_array[i].x;
+                points[i*2+1] = polygon->point_array[i].y;
+            }
+            offsets.clear();
+            if (polygon->repetition.type != RepetitionType::None) {
+                Array<Vec2> g_offsets = {};
+                polygon->repetition.get_offsets(g_offsets);
+                offsets.resize(g_offsets.count*2);
+                for (uint64_t i=0; i<g_offsets.count; i++) {
+                    offsets[i*2  ] = g_offsets.items[i].x;
+                    offsets[i*2+1] = g_offsets.items[i].y;
+                }
+                g_offsets.clear();
+            }
+        };
+    };
+
+    std::vector<OffsettedPolys> offsetted_polys;
+
+    bool   ref_node = false;
+    double ref_node_origin[2] = {0,0};
+    double ref_node_magnification = 1;
+    bool   ref_node_x_reflection  = false;
+    double ref_node_rotation      = 0;
+    std::vector<double> offsets;
+
+    //
+    std::vector<std::shared_ptr<OffsetPolyTree>> ch;
+
+    void print(const std::string &ind, int chid = -1) const {
+        if(chid == -1) {
+            printf("%s[root, ", ind.c_str());
+        } else {
+            printf("%s[ch%d, ", ind.c_str(), chid);
+        }
+        if(ref_node) {
+            printf("reference]\n");
+        } else {
+            printf("cell]\n");
+        }
+
+        printf("%s  #offsetted_polys = %d\n", ind.c_str(), (int)offsetted_polys.size());
+        printf("%s  #offsets         = %d\n", ind.c_str(), (int)offsets.size()/2);
+        printf("%s  origin = %lf,%lf\n", ind.c_str(), ref_node_origin[0], ref_node_origin[1]);
+        printf("%s  magnification = %lf\n", ind.c_str(), ref_node_magnification);
+        printf("%s  rotation = %lf\n", ind.c_str(), ref_node_rotation);
+        printf("%s  x_reflection = %s\n", ind.c_str(), ref_node_x_reflection ? "true" : "false");
+
+        for(size_t i=0; i<ch.size(); i++) {
+            ch[i]->print(ind + "    ", i);
+        }
+    }
+};
 
 }  // namespace gdstk
 

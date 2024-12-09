@@ -465,6 +465,63 @@ void Cell::get_polygons_callback(bool apply_repetitions, bool include_paths, int
     }
 }
 
+void Cell::build_polygon_tree(std::shared_ptr<OffsetPolyTree> cell_node, int64_t depth, bool filter, Tag tag, bool verbose) const
+{
+    if(verbose) {
+        printf("    [%3d] Cell=%16p:\n", (int)depth, this);
+        printf("    [%3d] polygon_array.count = %d\n", (int)depth, (int)polygon_array.count);
+        printf("    [%3d] polygon_array.items = %16p\n", (int)depth, polygon_array.items);
+        printf("    [%3d] offsetted_polys.size = %d\n", (int)depth, (int)cell_node->offsetted_polys.size());
+    }
+
+    for (uint64_t i = 0; i < polygon_array.count; i++) {
+        Polygon *polygon = polygon_array[i];
+        cell_node->offsetted_polys.emplace_back(OffsetPolyTree::OffsettedPolys{});
+        cell_node->offsetted_polys.back().copy(polygon);
+    }
+
+    if(verbose) {
+        printf("    [%3d] Cell=%16p: #1\n", (int)depth, this);
+    }
+
+    // path
+    {
+        Array<Polygon*> poly_array = {};
+        FlexPath** flexpath = flexpath_array.items;
+        for (uint64_t i = 0; i < flexpath_array.count; i++, flexpath++) {
+            // NOTE: return ErrorCode ignored here
+            (*flexpath)->to_polygons(filter, tag, poly_array);
+        }
+  
+        RobustPath** robustpath = robustpath_array.items;
+        for (uint64_t i = 0; i < robustpath_array.count; i++, robustpath++) {
+            // NOTE: return ErrorCode ignored here
+            (*robustpath)->to_polygons(filter, tag, poly_array);
+        }
+  
+        for(uint64_t i=0; i<poly_array.count; i++) {
+            cell_node->offsetted_polys.emplace_back(OffsetPolyTree::OffsettedPolys{});
+            cell_node->offsetted_polys.back().copy(poly_array[i]);
+        }
+        poly_array.clear();
+    }
+
+    if(verbose) {
+        printf("    [%3d] Cell=%16p: #2\n", (int)depth, this);
+    }
+
+    assert(cell_node->ch.size() == 0);
+    cell_node->ch.resize(reference_array.count);
+    for (uint64_t i = 0; i < reference_array.count; i++) {
+        cell_node->ch[i] = std::make_shared<OffsetPolyTree>();
+        cell_node->ch[i]->depth = depth;
+    }
+ 
+    for (uint64_t i = 0; i < reference_array.count; i++) {
+        reference_array.items[i]->build_polygon_tree(cell_node->ch[i], depth+1, filter, tag, verbose);
+    }
+}
+
 void Cell::get_flexpaths(bool apply_repetitions, int64_t depth, bool filter, Tag tag,
                          Array<FlexPath*>& result) const {
     uint64_t start = result.count;
