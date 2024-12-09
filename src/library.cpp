@@ -29,7 +29,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <gdstk/utils.hpp>
 #include <gdstk/vec.hpp>
 
-bool verbose = false;
+constexpr bool verbose = false;
 
 namespace gdstk {
 
@@ -1672,7 +1672,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
             } break;
             case OasisRecord::LAYERNAME_DATA: {
                 uint8_t* bytes = oasis_read_string(in, false, len);
-                if(verbose) {
+                if constexpr(verbose) {
                     std::string layer_name_data{(const char*)bytes, len};
                     printf("LAYERNAME_DATA: %s", layer_name_data.c_str());
                 }
@@ -1680,14 +1680,14 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 int data_type    = -1;
                 for (uint32_t i = 2; i > 0; i--) {
                     uint64_t type = oasis_read_unsigned_integer(in);
-                    if(verbose) printf("[type=%d: ", (int)type);
+                    if constexpr(verbose) printf("[type=%d: ", (int)type);
                     if (type > 0) {
                         if (type == 4) {
                             uint64_t d = oasis_read_unsigned_integer(in);
-                            if(verbose) printf("%i,", (int)d);
+                            if constexpr(verbose) printf("%i,", (int)d);
                         }
                         uint64_t u = oasis_read_unsigned_integer(in);
-                        if(verbose) printf("%i,", (int)u);
+                        if constexpr(verbose) printf("%i,", (int)u);
                         if(i==1) {
                             data_type = int(u);
                         } else
@@ -1695,14 +1695,14 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                             layer_number = int(u);
                         }
                     }
-                    if(verbose) printf("]");
+                    if constexpr(verbose) printf("]");
                 }
-                if(verbose) printf("\n");
+                if constexpr(verbose) printf("\n");
                 std::string layer_name{(const char*)bytes, len};
                 library.layer_names.push_back(layer_name);
                 library.layer_numbers.push_back(layer_number);
                 library.datatypes.push_back(data_type);
-                if(verbose) {
+                if constexpr(verbose) {
                     printf("layer_name = %s, layer_number = %d\n", layer_name.c_str(), layer_number);
                 }
                 free_allocation(bytes);
@@ -1710,25 +1710,25 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
             case OasisRecord::LAYERNAME_TEXT: {
                 // Unused record
                 uint8_t * bytes = oasis_read_string(in, false, len);
-                if(verbose) {
+                if constexpr(verbose) {
                     std::string layer_name_text{(const char*)bytes, len};
                     printf("LAYERNAME_TEXT: %s",layer_name_text.c_str());
                 }
                 free_allocation(bytes);
                 for (uint32_t i = 2; i > 0; i--) {
                     uint64_t type = oasis_read_unsigned_integer(in);
-                    if(verbose) printf("[type=%d: ", (int)type);
+                    if constexpr(verbose) printf("[type=%d: ", (int)type);
                     if (type > 0) {
                         if (type == 4) {
                             uint64_t d = oasis_read_unsigned_integer(in);
-                            if(verbose) printf("%i,", (int)d);
+                            if constexpr(verbose) printf("%i,", (int)d);
                         }
                         uint d = oasis_read_unsigned_integer(in);
-                        if(verbose) printf("%i,", (int)d);
+                        if constexpr(verbose) printf("%i,", (int)d);
                     }
-                    if(verbose) printf("]");
+                    if constexpr(verbose) printf("]");
                 }
-                if(verbose) printf("\n");
+                if constexpr(verbose) printf("\n");
             }   break;
             case OasisRecord::CELL_REF_NUM:
             case OasisRecord::CELL: {
@@ -2566,7 +2566,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
 CLEANUP:
     fclose(in.file);
 
-    if(verbose) {
+    if constexpr(verbose) {
         const std::vector<std::string> record_names = {
             "PAD",                  //  0
             "START",                //  1

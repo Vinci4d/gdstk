@@ -312,22 +312,12 @@ void Reference::get_polygons_callback(bool apply_repetitions, bool include_paths
                     count[0]++;
                     callback(src);  // dummy
                 } else {
-                    if(1) {
-                        dst->copy_from(*src);
-                        dst->transform(magnification, x_reflection, rotation, origin + *offset_p++);
-                        callback(dst);
-                        dst->point_array.clear();
-                        dst->repetition.clear();
-                        free_allocation(dst->properties);
-                    } else {
-                        dst->tag = src->tag;
-                        dst->point_array.overwrite_copy_from(src->point_array);
-                        dst->repetition.overwrite_copy_from(src->repetition);
-                        dst->properties = properties_copy(src->properties);
-                        dst->transform(magnification, x_reflection, rotation, origin + *offset_p++);
-                        callback(dst);
-                        free_allocation(dst->properties);
-                    }
+                    dst->copy_from(*src);
+                    dst->transform(magnification, x_reflection, rotation, origin + *offset_p++);
+                    callback(dst);
+                    dst->point_array.clear();
+                    dst->repetition.clear();
+                    free_allocation(dst->properties);
                 }
             }
         },
