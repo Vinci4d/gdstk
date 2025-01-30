@@ -140,6 +140,58 @@ void inside(const Array<Vec2>& points, const Array<Polygon*>& polygons, bool* re
 bool all_inside(const Array<Vec2>& points, const Array<Polygon*>& polygons);
 bool any_inside(const Array<Vec2>& points, const Array<Polygon*>& polygons);
 
+struct RepetitionInfo {
+
+    RepetitionType type;
+
+    struct {               // Rectangular and Regular
+        uint64_t columns;  // Along x or v1
+        uint64_t rows;     // Along y or v2
+        union {
+            double spacing[2];  // Rectangular spacing
+            struct {
+                double v1[2];  // Regular axis 1
+                double v2[2];  // Regular axis 2
+            };
+        };
+    };
+    std::vector<double> offsets;   // Explicit
+    std::vector<double> coords;    // ExplicitX and ExplicitY
+
+    void operator=(const Repetition &r) {
+        type    = r.type;
+        switch(type) {
+            case RepetitionType::Rectangular: {
+                columns = r.columns;
+                rows    = r.rows;
+                spacing[0] = r.spacing.x;
+                spacing[1] = r.spacing.y;
+            } break;
+            case RepetitionType::Regular: {
+                columns = r.columns;
+                rows    = r.rows;
+                v1[0] = r.v1.x;      v1[1] = r.v1.y;
+                v2[0] = r.v2.x;      v2[1] = r.v2.y;
+            } break;
+            case RepetitionType::Explicit: {
+                offsets.resize(r.offsets.count*2);
+                for(size_t i=0; i<r.offsets.count; i++) {
+                    offsets[i*2  ] = r.offsets[i].x;
+                    offsets[i*2+1] = r.offsets[i].y;
+                }
+            } break;
+            case RepetitionType::ExplicitX:
+            case RepetitionType::ExplicitY: {
+                coords.resize(r.coords.count);
+                for(size_t i=0; i<r.coords.count; i++) {
+                    coords[i] = r.coords[i];
+                }
+            } break;
+            default: break;
+        }
+    }
+};
+
 // intermediate tree, built from Cell::build_polygon_tree, Reference::build_polygon_tree
 struct OffsetPolyTree
 {
@@ -172,13 +224,14 @@ struct OffsetPolyTree
     };
 
     std::vector<OffsettedPolys> offsetted_polys;
+    std::vector<double> offsets;
+    RepetitionInfo repetitionInfo;
 
     bool   ref_node = false;
     double ref_node_origin[2] = {0,0};
     double ref_node_magnification = 1;
     bool   ref_node_x_reflection  = false;
     double ref_node_rotation      = 0;
-    std::vector<double> offsets;
 
     //
     std::vector<std::shared_ptr<OffsetPolyTree>> ch;

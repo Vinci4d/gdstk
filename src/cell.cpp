@@ -474,10 +474,19 @@ void Cell::build_polygon_tree(std::shared_ptr<OffsetPolyTree> cell_node, int64_t
         printf("    [%3d] offsetted_polys.size = %d\n", (int)depth, (int)cell_node->offsetted_polys.size());
     }
 
-    for (uint64_t i = 0; i < polygon_array.count; i++) {
-        Polygon *polygon = polygon_array[i];
-        cell_node->offsetted_polys.emplace_back(OffsetPolyTree::OffsettedPolys{});
-        cell_node->offsetted_polys.back().copy(polygon);
+    if (filter) {
+        for (uint64_t i = 0; i < polygon_array.count; i++) {
+            Polygon* polygon = polygon_array[i];
+            if (polygon->tag != tag) continue;
+            cell_node->offsetted_polys.emplace_back(OffsetPolyTree::OffsettedPolys{});
+            cell_node->offsetted_polys.back().copy(polygon);
+        }
+    } else {
+        for (uint64_t i = 0; i < polygon_array.count; i++) {
+            Polygon *polygon = polygon_array[i];
+            cell_node->offsetted_polys.emplace_back(OffsetPolyTree::OffsettedPolys{});
+            cell_node->offsetted_polys.back().copy(polygon);
+        }
     }
 
     if(verbose) {

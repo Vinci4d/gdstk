@@ -272,9 +272,10 @@ void Reference::build_polygon_tree(std::shared_ptr<OffsetPolyTree> node,
     node->ref_node_origin[1]     = origin.y;
 
     if (repetition.type != RepetitionType::None) {
+        node->repetitionInfo = repetition; // keep a copy of repetition
+
         Array<Vec2> offsets = {};
         repetition.get_offsets(offsets);
-
         node->offsets.resize(offsets.count*2);
         for (uint64_t i = 0; i < offsets.count; i++) {
             node->offsets[i*2+0] = offsets.items[i].x;
