@@ -8,6 +8,8 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #ifndef GDSTK_HEADER_LIBRARY
 #define GDSTK_HEADER_LIBRARY
 
+#include <map>
+#include <utility>
 #define __STDC_FORMAT_MACROS 1
 #define _USE_MATH_DEFINES
 
@@ -35,9 +37,7 @@ struct Library {
     double precision;
 
     //
-    std::vector<std::string> layer_names;
-    std::vector<int>         layer_numbers;
-    std::vector<int>         datatypes;
+    std::map<Tag, std::string> tag_to_layername;
 
     // Cells should be added to (or removed from) the library using these
     // arrays.  Each cell must have a unique name within the library, but Gdstk
