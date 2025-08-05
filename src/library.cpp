@@ -1208,6 +1208,8 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                         }
                         polygon->clear();
                         free_allocation(polygon);
+                    } else if (library.tag_to_layername.find(polygon->tag) == library.tag_to_layername.end()) {
+                        library.tag_to_layername[polygon->tag] = "";
                     }
                 } else if (path) {
                     if (shape_tags && !shape_tags->has_value(path->elements[0].tag) && cell) {
@@ -1220,6 +1222,8 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                         }
                         path->clear();
                         free_allocation(path);
+                    } else if (library.tag_to_layername.find(path->elements[0].tag) == library.tag_to_layername.end()) {
+                        library.tag_to_layername[path->elements[0].tag] = "";
                     }
                 }
                 polygon = NULL;
@@ -1731,9 +1735,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
                 if constexpr(verbose) printf("\n");
                 std::string layer_name{(const char*)bytes, len};
-                library.layer_names.push_back(layer_name);
-                library.layer_numbers.push_back(layer_number);
-                library.datatypes.push_back(data_type);
+                library.tag_to_layername[make_tag(layer_number, data_type)] = layer_name;
                 if constexpr(verbose) {
                     printf("layer_name = %s, layer_number = %d\n", layer_name.c_str(), layer_number);
                 }
@@ -1970,6 +1972,10 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     modal_datatype = (uint32_t)oasis_read_unsigned_integer(in);
                 }
                 set_type(polygon->tag, modal_datatype);
+
+                if (library.tag_to_layername.find(polygon->tag) == library.tag_to_layername.end())
+                    library.tag_to_layername[polygon->tag] = "";
+
                 if (info & 0x20) {
                     modal_polygon_points.count = 1;
                     oasis_read_point_list(in, factor, true, modal_polygon_points);
@@ -2021,6 +2027,10 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     modal_datatype = (uint32_t)oasis_read_unsigned_integer(in);
                 }
                 set_type(element->tag, modal_datatype);
+
+                if (library.tag_to_layername.find(element->tag) == library.tag_to_layername.end())
+                    library.tag_to_layername[element->tag] = "";
+
                 if (info & 0x40) {
                     modal_path_halfwidth = factor * oasis_read_unsigned_integer(in);
                 }
@@ -2103,6 +2113,10 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     modal_datatype = (uint32_t)oasis_read_unsigned_integer(in);
                 }
                 set_type(polygon->tag, modal_datatype);
+
+                if (library.tag_to_layername.find(polygon->tag) == library.tag_to_layername.end())
+                    library.tag_to_layername[polygon->tag] = "";
+
                 if (info & 0x40) {
                     modal_geom_dim.x = factor * oasis_read_unsigned_integer(in);
                 }
@@ -2197,6 +2211,10 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     modal_datatype = (uint32_t)oasis_read_unsigned_integer(in);
                 }
                 set_type(polygon->tag, modal_datatype);
+
+                if (library.tag_to_layername.find(polygon->tag) == library.tag_to_layername.end())
+                    library.tag_to_layername[polygon->tag] = "";
+
                 if (info & 0x80) {
                     oasis_read(&modal_ctrapezoid_type, 1, 1, in);
                 }
