@@ -549,6 +549,7 @@ void Cell::get_flexpaths(bool apply_repetitions, int64_t depth, bool filter, Tag
                     path->repetition.copy_from(psrc->repetition);
                     path->scale_width = psrc->scale_width;
                     path->simple_path = psrc->simple_path;
+                    path->raith_data.copy_from(psrc->raith_data);
                 }
                 path->num_elements++;
                 path->elements = (FlexPathElement*)reallocate(
@@ -799,13 +800,13 @@ ErrorCode Cell::to_gds(FILE* out, double scaling, uint64_t max_points, double pr
     if (len % 2) len++;
     uint16_t buffer_start[] = {28,
                                0x0502,
-                               (uint16_t)(timestamp->tm_year + 1900),
+                               (uint16_t)(timestamp->tm_year),
                                (uint16_t)(timestamp->tm_mon + 1),
                                (uint16_t)timestamp->tm_mday,
                                (uint16_t)timestamp->tm_hour,
                                (uint16_t)timestamp->tm_min,
                                (uint16_t)timestamp->tm_sec,
-                               (uint16_t)(timestamp->tm_year + 1900),
+                               (uint16_t)(timestamp->tm_year),
                                (uint16_t)(timestamp->tm_mon + 1),
                                (uint16_t)timestamp->tm_mday,
                                (uint16_t)timestamp->tm_hour,

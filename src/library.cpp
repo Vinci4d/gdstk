@@ -338,13 +338,13 @@ ErrorCode Library::write_gds(const char* filename, uint64_t max_points, tm* time
                                0x0258,
                                28,
                                0x0102,
-                               (uint16_t)(timestamp->tm_year + 1900),
+                               (uint16_t)(timestamp->tm_year),
                                (uint16_t)(timestamp->tm_mon + 1),
                                (uint16_t)timestamp->tm_mday,
                                (uint16_t)timestamp->tm_hour,
                                (uint16_t)timestamp->tm_min,
                                (uint16_t)timestamp->tm_sec,
-                               (uint16_t)(timestamp->tm_year + 1900),
+                               (uint16_t)(timestamp->tm_year),
                                (uint16_t)(timestamp->tm_mon + 1),
                                (uint16_t)timestamp->tm_mday,
                                (uint16_t)timestamp->tm_hour,
@@ -932,8 +932,10 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
     // One extra char in case we need a 0-terminated string with max count (should never happen, but
     // it doesn't hurt to be prepared).
     uint8_t buffer[65537];
+    uint16_t* udata16 = (uint16_t*)(buffer + 4);
     int16_t* data16 = (int16_t*)(buffer + 4);
     int32_t* data32 = (int32_t*)(buffer + 4);
+    uint32_t* udata32 = (uint32_t*)(buffer + 4);
     uint64_t* data64 = (uint64_t*)(buffer + 4);
     char* str = (char*)(buffer + 4);
 
@@ -967,7 +969,8 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
         //        record_length);
 
         uint64_t data_length;
-        switch ((GdsiiDataType)buffer[3]) {
+        GdsiiDataType data_type = (GdsiiDataType)buffer[3];
+        switch (data_type) {
             case GdsiiDataType::BitArray:
             case GdsiiDataType::TwoByteSignedInteger:
                 data_length = (record_length - 4) / 2;
@@ -1092,19 +1095,41 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 if (cell) cell->label_array.append(label);
                 break;
             case GdsiiRecord::LAYER:
-                if (polygon)
-                    set_layer(polygon->tag, data16[0]);
-                else if (path)
-                    set_layer(path->elements[0].tag, data16[0]);
-                else if (label)
-                    set_layer(label->tag, data16[0]);
+                if (polygon) {
+                    if (data_type == GdsiiDataType::FourByteSignedInteger) {
+                        set_layer(polygon->tag, udata32[0]);
+                    } else {
+                        set_layer(polygon->tag, udata16[0]);
+                    }
+                } else if (path) {
+                    if (data_type == GdsiiDataType::FourByteSignedInteger) {
+                        set_layer(path->elements[0].tag, udata32[0]);
+                    } else {
+                        set_layer(path->elements[0].tag, udata16[0]);
+                    }
+                } else if (label) {
+                    if (data_type == GdsiiDataType::FourByteSignedInteger) {
+                        set_layer(label->tag, udata32[0]);
+                    } else {
+                        set_layer(label->tag, udata16[0]);
+                    }
+                }
                 break;
             case GdsiiRecord::DATATYPE:
             case GdsiiRecord::BOXTYPE:
-                if (polygon)
-                    set_type(polygon->tag, data16[0]);
-                else if (path)
-                    set_type(path->elements[0].tag, data16[0]);
+                if (polygon) {
+                    if (data_type == GdsiiDataType::FourByteSignedInteger) {
+                        set_type(polygon->tag, udata32[0]);
+                    } else {
+                        set_type(polygon->tag, udata16[0]);
+                    }
+                } else if (path) {
+                    if (data_type == GdsiiDataType::FourByteSignedInteger) {
+                        set_type(path->elements[0].tag, udata32[0]);
+                    } else {
+                        set_type(path->elements[0].tag, udata16[0]);
+                    }
+                }
                 break;
             case GdsiiRecord::WIDTH:
                 if (data32[0] < 0) {
@@ -1147,7 +1172,8 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                     reference->origin = origin;
                     if (reference->repetition.type != RepetitionType::None) {
                         Repetition* repetition = &reference->repetition;
-                        if (reference->rotation == 0 && !reference->x_reflection) {
+                        if (reference->rotation == 0 && !reference->x_reflection &&
+                                data32[3] == 0  && data32[4] == 0) {
                             repetition->spacing.x =
                                 (factor * data32[2] - origin.x) / repetition->columns;
                             repetition->spacing.y =
@@ -1224,7 +1250,13 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 }
                 break;
             case GdsiiRecord::TEXTTYPE:
-                if (label) set_type(label->tag, data16[0]);
+                if (label) {
+                    if (data_type == GdsiiDataType::FourByteSignedInteger) {
+                        set_type(label->tag, udata32[0]);
+                    } else {
+                        set_type(label->tag, udata16[0]);
+                    }
+                }
                 break;
             case GdsiiRecord::PRESENTATION:
                 if (label) label->anchor = (Anchor)(data16[0] & 0x000F);
@@ -1285,13 +1317,13 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
             case GdsiiRecord::PROPVALUE:
                 if (str[data_length - 1] != 0) str[data_length++] = 0;
                 if (polygon) {
-                    set_gds_property(polygon->properties, key, str);
+                    set_gds_property(polygon->properties, key, str, data_length);
                 } else if (path) {
-                    set_gds_property(path->properties, key, str);
+                    set_gds_property(path->properties, key, str, data_length);
                 } else if (reference) {
-                    set_gds_property(reference->properties, key, str);
+                    set_gds_property(reference->properties, key, str, data_length);
                 } else if (label) {
-                    set_gds_property(label->properties, key, str);
+                    set_gds_property(label->properties, key, str, data_length);
                 }
                 break;
             case GdsiiRecord::BGNEXTN:
@@ -2686,7 +2718,7 @@ tm gds_timestamp(const char* filename, const tm* new_timestamp, ErrorCode* error
     FILE* inout = NULL;
 
     if (new_timestamp) {
-        new_tm_buffer[0] = new_timestamp->tm_year + 1900;
+        new_tm_buffer[0] = new_timestamp->tm_year;
         new_tm_buffer[1] = new_timestamp->tm_mon + 1;
         new_tm_buffer[2] = new_timestamp->tm_mday;
         new_tm_buffer[3] = new_timestamp->tm_hour;
@@ -2722,7 +2754,7 @@ tm gds_timestamp(const char* filename, const tm* new_timestamp, ErrorCode* error
                 return result;
             }
             big_endian_swap16(data16, 6);
-            result.tm_year = data16[0] - 1900;
+            result.tm_year = data16[0];
             result.tm_mon = data16[1] - 1;
             result.tm_mday = data16[2];
             result.tm_hour = data16[3];
@@ -2767,7 +2799,8 @@ ErrorCode gds_info(const char* filename, LibraryInfo& info) {
     // One extra char in case we need a 0-terminated string with max count (should never happen, but
     // it doesn't hurt to be prepared).
     uint8_t buffer[65537];
-    int16_t* data16 = (int16_t*)(buffer + 4);
+    uint16_t* data16 = (uint16_t*)(buffer + 4);
+    uint32_t* data32 = (uint32_t*)(buffer + 4);
     uint64_t* data64 = (uint64_t*)(buffer + 4);
     char* str = (char*)(buffer + 4);
 
@@ -2827,20 +2860,29 @@ ErrorCode gds_info(const char* filename, LibraryInfo& info) {
                 next_set = &info.label_tags;
                 break;
             case GdsiiRecord::LAYER:
-                big_endian_swap16((uint16_t*)data16, 1);
-                layer = data16[0];
+                if ((GdsiiDataType)buffer[3] == GdsiiDataType::FourByteSignedInteger) {
+                    big_endian_swap32((uint32_t*)data32, 1);
+                    layer = data32[0];
+                } else {
+                    big_endian_swap16((uint16_t*)data16, 1);
+                    layer = data16[0];
+                }
                 break;
             case GdsiiRecord::DATATYPE:
             case GdsiiRecord::BOXTYPE:
             case GdsiiRecord::TEXTTYPE:
-                big_endian_swap16((uint16_t*)data16, 1);
-                if (next_set) {
-                    next_set->add(make_tag(layer, data16[0]));
-                    next_set = NULL;
-                } else {
+                if (!next_set) {
                     if (error_logger)
                         fputs("[GDSTK] Inconsistency detected in GDSII file.\n", error_logger);
                     error = ErrorCode::InvalidFile;
+                } else if ((GdsiiDataType)buffer[3] == GdsiiDataType::FourByteSignedInteger) {
+                    big_endian_swap32((uint32_t*)data32, 1);
+                    next_set->add(make_tag(layer, data32[0]));
+                    next_set = NULL;
+                } else {
+                    big_endian_swap16((uint16_t*)data16, 1);
+                    next_set->add(make_tag(layer, data16[0]));
+                    next_set = NULL;
                 }
                 break;
             // case GdsiiRecord::HEADER:

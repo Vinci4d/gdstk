@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.60 - 2025-04-15
+### Fixed
+- Added support to 32-bit layers and datatypes.
+
+## 0.9.59 - 2025-02-11
+### Fixed
+- Treat string properties as binary byte arrays in OASIS.
+
+## 0.9.58 - 2024-11-25
+### Changed
+- Empty paths now give a warning when being converted to polygons or stored in GDSII/OASIS.
+### Fixed
+- Missing paths when vertices were separated exactly by the tolerance (#277)
+
+## 0.9.57 - 2024-11-07
+### Fixed
+- Bug when removing GDSII properties (#276, thanks jatoben).
+
+## 0.9.56 - 2024-10-28
+### Added
+- Support for Python 3.13.
+### Fixed
+- Copy Raith data in `Cell::get_flexpaths`.
+
 ## 0.9.55 - 2024-08-31
 ### Fixed
 - Memory bug fix for Raith data
