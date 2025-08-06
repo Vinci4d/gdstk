@@ -1953,6 +1953,10 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
                 *polygon = rectangle(modal_geom_pos, modal_geom_pos + modal_geom_dim,
                                      make_tag(modal_layer, modal_datatype));
+
+                if (library.tag_to_layername.find(polygon->tag) == library.tag_to_layername.end())
+                    library.tag_to_layername[polygon->tag] = "";
+
                 if (info & 0x04) {
                     oasis_read_repetition(in, factor, modal_repetition);
                     polygon->repetition.copy_from(modal_repetition);
@@ -2402,6 +2406,10 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
                 *polygon = ellipse(modal_geom_pos, modal_circle_radius, modal_circle_radius, 0, 0,
                                    0, 0, tolerance, make_tag(modal_layer, modal_datatype));
+
+                if (library.tag_to_layername.find(polygon->tag) == library.tag_to_layername.end())
+                    library.tag_to_layername[polygon->tag] = "";
+
                 if (info & 0x04) {
                     oasis_read_repetition(in, factor, modal_repetition);
                     polygon->repetition.copy_from(modal_repetition);
