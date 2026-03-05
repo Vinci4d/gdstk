@@ -4,7 +4,7 @@ from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout, CMakeDeps
 
 class gdstkRecipe(ConanFile):
     name = "gdstk"
-    version = "0.9.60.1"
+    version = "0.9.60.99"
     package_type = "library"
 
     # Optional metadata

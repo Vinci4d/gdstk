@@ -13,6 +13,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <zlib.h>
 
 #include <gdstk/allocator.hpp>
@@ -928,6 +929,22 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
         "BGNEXTN",   "ENDEXTN",  "TAPENUM",   "TAPECODE",   "STRCLASS",    "RESERVED",
         "FORMAT",    "MASK",     "ENDMASKS",  "LIBDIRSIZE", "SRFNAME",     "LIBSECUR"};
 
+    struct timespec t_start, t_now;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+    auto elapsed_ms = [&t_start, &t_now]() -> double {
+        clock_gettime(CLOCK_MONOTONIC, &t_now);
+        return (t_now.tv_sec - t_start.tv_sec) * 1000.0 +
+               (t_now.tv_nsec - t_start.tv_nsec) / 1.0e6;
+    };
+
+    fprintf(stderr, "[V4D-GDS-DEBUG] ========================================\n");
+    fprintf(stderr, "[V4D-GDS-DEBUG] read_gds called at +%.1fms\n", 0.0);
+    fprintf(stderr, "[V4D-GDS-DEBUG]   filename: <redacted> (length=%zu)\n",
+            filename ? strlen(filename) : 0);
+    fprintf(stderr, "[V4D-GDS-DEBUG]   unit: %g, tolerance: %g\n", unit, tolerance);
+    fprintf(stderr, "[V4D-GDS-DEBUG]   shape_tags filter: %s\n", shape_tags ? "YES" : "NO");
+    fflush(stderr);
+
     Library library = {};
     // One extra char in case we need a 0-terminated string with max count (should never happen, but
     // it doesn't hurt to be prepared).
@@ -949,24 +966,95 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
     double width = 0;
     int16_t key = 0;
 
+    uint64_t record_count = 0;
+    uint64_t total_cells = 0;
+    uint64_t total_polygons = 0;
+    uint64_t total_paths = 0;
+    uint64_t total_references = 0;
+    uint64_t total_labels = 0;
+    uint64_t total_bytes_read = 0;
+
     FILE* in = fopen(filename, "rb");
     if (in == NULL) {
+        fprintf(stderr, "[V4D-GDS-DEBUG] FAILED to open file (name redacted)\n");
+        fflush(stderr);
         fputs("[GDSTK] Unable to open GDSII file for input.\n", stderr);
         if (error_code) *error_code = ErrorCode::InputFileOpenError;
         return library;
     }
 
+    // get file size for progress reporting
+    fseek(in, 0, SEEK_END);
+    long file_size = ftell(in);
+    fseek(in, 0, SEEK_SET);
+    fprintf(stderr, "[V4D-GDS-DEBUG] File opened successfully, size: %ld bytes (%.2f MB). "
+                    ">>> If this is the last log, hang is before first record read. <<<\n",
+            file_size, file_size / (1024.0 * 1024.0));
+    fflush(stderr);
+
+    // Throttle strategy for multi-GB files:
+    //   - First 10 records: log each one individually (to capture file header/structure)
+    //   - After that: log progress every 10M records (~50 lines for a 5GB file)
+    //   - Cells: log first 5 + every 500th (catches start, samples the rest)
+    //   - Errors/completion: always logged
+    const uint64_t records_verbose_limit = 10;
+    const uint64_t progress_interval = 10000000;
+    const uint64_t cells_verbose_limit = 5;
+    const uint64_t cell_log_interval = 500;
+
     while (true) {
         uint64_t record_length = COUNT(buffer);
+        long file_pos_before = ftell(in);
         ErrorCode err = gdsii_read_record(in, buffer, record_length);
+        record_count++;
+        total_bytes_read += record_length;
+
         if (err != ErrorCode::NoError) {
+            fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record FAILED at +%.1fms\n", elapsed_ms());
+            fprintf(stderr, "[V4D-GDS-DEBUG]   record #%" PRIu64 ", file_pos: %ld/%ld (%.1f%%)\n",
+                    record_count, file_pos_before, file_size,
+                    file_size > 0 ? 100.0 * file_pos_before / file_size : 0.0);
+            fprintf(stderr, "[V4D-GDS-DEBUG]   error_code: %d\n", (int)err);
+            fflush(stderr);
             if (error_code) *error_code = err;
             break;
         }
 
-        // printf("0x%02X %s (%" PRIu64 " bytes)", buffer[2],
-        //        buffer[2] < COUNT(gdsii_record_names) ? gdsii_record_names[buffer[2]] : "",
-        //        record_length);
+        if (record_count % progress_interval == 0) {
+            long cur_pos = ftell(in);
+            fprintf(stderr,
+                    "[V4D-GDS-DEBUG] Progress: record #%" PRIu64 " at +%.1fms, "
+                    "file_pos: %ld/%ld (%.1f%%), "
+                    "cells=%" PRIu64 " polys=%" PRIu64 " paths=%" PRIu64
+                    " refs=%" PRIu64 " labels=%" PRIu64 ". "
+                    ">>> If this is the last log, hang is in processing records after this point. "
+                    "Next record will be #%" PRIu64 ". <<<\n",
+                    record_count, elapsed_ms(), cur_pos, file_size,
+                    file_size > 0 ? 100.0 * cur_pos / file_size : 0.0,
+                    total_cells, total_polygons, total_paths, total_references, total_labels,
+                    record_count + 1);
+            fflush(stderr);
+        }
+
+        const char* rec_name = (buffer[2] < COUNT(gdsii_record_names))
+                                   ? gdsii_record_names[buffer[2]]
+                                   : "UNKNOWN";
+
+        if (record_count <= records_verbose_limit) {
+            fprintf(stderr,
+                    "[V4D-GDS-DEBUG] rec #%" PRIu64 ": 0x%02X %s (%" PRIu64
+                    " bytes) at file_pos %ld. "
+                    ">>> If this is the last log, hang is processing record 0x%02X %s. <<<\n",
+                    record_count, buffer[2], rec_name, record_length, file_pos_before,
+                    buffer[2], rec_name);
+            if (record_count == records_verbose_limit) {
+                fprintf(stderr, "[V4D-GDS-DEBUG] --- Throttling: verbose per-record logging done. "
+                                "From here: progress every %" PRIu64 " records, "
+                                "cell info every %" PRIu64 " cells. ---\n",
+                                progress_interval, cell_log_interval);
+            }
+            fflush(stderr);
+        }
 
         uint64_t data_length;
         GdsiiDataType data_type = (GdsiiDataType)buffer[3];
@@ -975,37 +1063,44 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
             case GdsiiDataType::TwoByteSignedInteger:
                 data_length = (record_length - 4) / 2;
                 big_endian_swap16((uint16_t*)data16, data_length);
-                // for (uint32_t i = 0; i < data_length; i++) printf(" %" PRId16, data16[i]);
                 break;
             case GdsiiDataType::FourByteSignedInteger:
             case GdsiiDataType::FourByteReal:
                 data_length = (record_length - 4) / 4;
                 big_endian_swap32((uint32_t*)data32, data_length);
-                // for (uint32_t i = 0; i < data_length; i++) printf(" %" PRId32, data32[i]);
                 break;
             case GdsiiDataType::EightByteReal:
                 data_length = (record_length - 4) / 8;
                 big_endian_swap64(data64, data_length);
-                // for (uint32_t i = 0; i < data_length; i++)
-                // printf(" %" PRIu64 " (%g)", data64[i], gdsii_real_to_double(data64[i]));
                 break;
             default:
                 data_length = record_length - 4;
-                // for (uint32_t i = 0; i < data_length; i++) printf(" %c", str[i]);
         }
-
-        // putchar('\n');
 
         switch ((GdsiiRecord)(buffer[2])) {
             case GdsiiRecord::HEADER:
             case GdsiiRecord::BGNLIB:
+                break;
             case GdsiiRecord::ENDSTR:
+                if (cell && (total_cells <= cells_verbose_limit || total_cells % cell_log_interval == 0)) {
+                    fprintf(stderr,
+                            "[V4D-GDS-DEBUG] ENDSTR cell #%" PRIu64 " at +%.1fms: "
+                            "polygons=%" PRIu64 " flexpaths=%" PRIu64
+                            " refs=%" PRIu64 " labels=%" PRIu64 "\n",
+                            total_cells, elapsed_ms(),
+                            cell->polygon_array.count, cell->flexpath_array.count,
+                            cell->reference_array.count, cell->label_array.count);
+                    fflush(stderr);
+                }
                 break;
             case GdsiiRecord::LIBNAME:
                 if (str[data_length - 1] == 0) data_length--;
                 library.name = (char*)allocate(data_length + 1);
                 memcpy(library.name, str, data_length);
                 library.name[data_length] = 0;
+                fprintf(stderr, "[V4D-GDS-DEBUG] LIBNAME: <redacted> (length=%" PRIu64 ") at +%.1fms\n",
+                        data_length, elapsed_ms());
+                fflush(stderr);
                 break;
             case GdsiiRecord::UNITS: {
                 const double db_in_user = gdsii_real_to_double(data64[0]);
@@ -1021,13 +1116,40 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 if (tolerance <= 0) {
                     tolerance = library.precision / library.unit;
                 }
+                fprintf(stderr,
+                        "[V4D-GDS-DEBUG] UNITS at +%.1fms: db_in_user=%g, db_in_meters=%g, "
+                        "factor=%g, library.unit=%g, library.precision=%g, tolerance=%g\n",
+                        elapsed_ms(), db_in_user, db_in_meters, factor,
+                        library.unit, library.precision, tolerance);
+                fflush(stderr);
             } break;
             case GdsiiRecord::ENDLIB: {
+                fprintf(stderr,
+                        "[V4D-GDS-DEBUG] ENDLIB at +%.1fms — about to resolve references. "
+                        ">>> If this is the last log, hang is in reference resolution. <<<\n",
+                        elapsed_ms());
+                fprintf(stderr,
+                        "[V4D-GDS-DEBUG]   Total records: %" PRIu64
+                        ", cells: %" PRIu64 ", polygons: %" PRIu64
+                        ", paths: %" PRIu64 ", refs: %" PRIu64 ", labels: %" PRIu64 "\n",
+                        record_count, total_cells, total_polygons, total_paths,
+                        total_references, total_labels);
+                fflush(stderr);
+
                 Map<Cell*> map = {};
                 uint64_t c_size = library.cell_array.count;
                 map.resize((uint64_t)(2.0 + 10.0 / GDSTK_MAP_CAPACITY_THRESHOLD * c_size));
                 Cell** c_item = library.cell_array.items;
                 for (uint64_t i = c_size; i > 0; i--, c_item++) map.set((*c_item)->name, *c_item);
+
+                fprintf(stderr, "[V4D-GDS-DEBUG] Built cell map with %" PRIu64
+                                " cells, about to resolve refs. "
+                                ">>> If this is the last log, hang is in iterating cells to resolve references. <<<\n",
+                                c_size);
+                fflush(stderr);
+
+                uint64_t resolved_refs = 0;
+                uint64_t missing_refs = 0;
                 c_item = library.cell_array.items;
                 for (uint64_t i = c_size; i > 0; i--) {
                     cell = *c_item++;
@@ -1039,7 +1161,9 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                             free_allocation(reference->name);
                             reference->type = ReferenceType::Cell;
                             reference->cell = cp;
+                            resolved_refs++;
                         } else {
+                            missing_refs++;
                             if (error_code) *error_code = ErrorCode::MissingReference;
                             if (error_logger)
                                 fprintf(error_logger, "[GDSTK] Missing referenced cell %s\n",
@@ -1049,10 +1173,19 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 }
                 map.clear();
                 fclose(in);
+
+                fprintf(stderr,
+                        "[V4D-GDS-DEBUG] read_gds COMPLETE at +%.1fms\n", elapsed_ms());
+                fprintf(stderr,
+                        "[V4D-GDS-DEBUG]   resolved refs: %" PRIu64 ", missing refs: %" PRIu64 "\n",
+                        resolved_refs, missing_refs);
+                fprintf(stderr, "[V4D-GDS-DEBUG] ========================================\n");
+                fflush(stderr);
                 return library;
             } break;
             case GdsiiRecord::BGNSTR:
                 cell = (Cell*)allocate_clear(sizeof(Cell));
+                total_cells++;
                 break;
             case GdsiiRecord::STRNAME:
                 if (cell) {
@@ -1061,12 +1194,22 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                     memcpy(cell->name, str, data_length);
                     cell->name[data_length] = 0;
                     library.cell_array.append(cell);
+                    if (total_cells <= cells_verbose_limit || total_cells % cell_log_interval == 0) {
+                        fprintf(stderr,
+                                "[V4D-GDS-DEBUG] BGNSTR cell #%" PRIu64 " at +%.1fms "
+                                "(file_pos %ld, %.1f%%). "
+                                ">>> If this is the last log, hang is while parsing this cell's contents. <<<\n",
+                                total_cells, elapsed_ms(), ftell(in),
+                                file_size > 0 ? 100.0 * ftell(in) / file_size : 0.0);
+                        fflush(stderr);
+                    }
                 }
                 break;
             case GdsiiRecord::BOUNDARY:
             case GdsiiRecord::BOX:
                 polygon = (Polygon*)allocate_clear(sizeof(Polygon));
                 if (cell) cell->polygon_array.append(polygon);
+                total_polygons++;
                 break;
             case GdsiiRecord::PATH:
             case GdsiiRecord::RAITHMBMSPATH:
@@ -1075,6 +1218,7 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 path->elements = (FlexPathElement*)allocate_clear(sizeof(FlexPathElement));
                 path->simple_path = true;
                 if (cell) cell->flexpath_array.append(path);
+                total_paths++;
                 break;
             case GdsiiRecord::RAITHPXXDATA:
                 if (path) {
@@ -1088,11 +1232,13 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 reference = (Reference*)allocate_clear(sizeof(Reference));
                 reference->magnification = 1;
                 if (cell) cell->reference_array.append(reference);
+                total_references++;
                 break;
             case GdsiiRecord::TEXT:
                 label = (Label*)allocate_clear(sizeof(Label));
                 label->magnification = 1;
                 if (cell) cell->label_array.append(label);
+                total_labels++;
                 break;
             case GdsiiRecord::LAYER:
                 if (polygon) {
@@ -1142,6 +1288,14 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 break;
             case GdsiiRecord::XY:
                 if (polygon) {
+                    if (data_length / 2 > 10000) {
+                        fprintf(stderr,
+                                "[V4D-GDS-DEBUG] XY large polygon: %" PRIu64
+                                " points at rec #%" PRIu64 " +%.1fms. "
+                                ">>> If this is the last log, hang is in processing this large polygon's point data. <<<\n",
+                                data_length / 2, record_count, elapsed_ms());
+                        fflush(stderr);
+                    }
                     polygon->point_array.ensure_slots(data_length / 2);
                     double* d = (double*)(polygon->point_array.items + polygon->point_array.count);
                     int32_t* s = data32;
@@ -1377,6 +1531,19 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
         }
     }
 
+    fprintf(stderr, "[V4D-GDS-DEBUG] read_gds EXITING VIA ERROR PATH at +%.1fms\n", elapsed_ms());
+    fprintf(stderr,
+            "[V4D-GDS-DEBUG]   records processed: %" PRIu64
+            ", cells: %" PRIu64 ", polygons: %" PRIu64
+            ", paths: %" PRIu64 ", refs: %" PRIu64 ", labels: %" PRIu64 "\n",
+            record_count, total_cells, total_polygons, total_paths,
+            total_references, total_labels);
+    fprintf(stderr, "[V4D-GDS-DEBUG]   last file_pos: %ld/%ld (%.1f%%)\n",
+            ftell(in), file_size,
+            file_size > 0 ? 100.0 * ftell(in) / file_size : 0.0);
+    fprintf(stderr, "[V4D-GDS-DEBUG]   freeing library and returning empty Library\n");
+    fprintf(stderr, "[V4D-GDS-DEBUG] ========================================\n");
+    fflush(stderr);
     library.free_all();
     fclose(in);
     return Library{};
