@@ -48,7 +48,7 @@ ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count) {
     s_read_record_call_count++;
 
     if (buffer_count < 4) {
-        fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record: insufficient buffer (< 4) "
+        fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record: insufficient buffer (< 4) "
                         "at call #%" PRIu64 "\n", s_read_record_call_count);
         fflush(stderr);
         if (error_logger) fputs("[GDSTK] Insufficient memory in buffer.\n", error_logger);
@@ -58,7 +58,7 @@ ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count) {
     // log before fread to detect hangs in I/O
     if (s_read_record_call_count <= 2 || s_read_record_call_count % s_read_record_log_interval == 0) {
         long pos = ftell(in);
-        fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record call #%" PRIu64
+        fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record call #%" PRIu64
                         ": about to fread 4-byte header at file_pos %ld. "
                         ">>> If this is the last log, hang is in fread (file I/O). "
                         "Check NFS/network mount/disk. <<<\n",
@@ -68,7 +68,7 @@ ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count) {
 
     uint64_t read_length = fread(buffer, 1, 4, in);
     if (read_length < 4) {
-        fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record: short header read %" PRIu64
+        fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record: short header read %" PRIu64
                         "/4 bytes at call #%" PRIu64 ", eof=%d, ferror=%d\n",
                 read_length, s_read_record_call_count, feof(in), ferror(in));
         fflush(stderr);
@@ -88,7 +88,7 @@ ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count) {
     big_endian_swap16((uint16_t*)buffer, 1);  // second word is interpreted byte-wise (no swapping);
     const uint32_t record_length = *((uint16_t*)buffer);
     if (record_length < 4) {
-        fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record: invalid record_length=%" PRIu32
+        fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record: invalid record_length=%" PRIu32
                         " at call #%" PRIu64 "\n", record_length, s_read_record_call_count);
         fflush(stderr);
         DEBUG_PRINT("Record length should be at least 4. Found %" PRIu32 "\n", record_length);
@@ -100,7 +100,7 @@ ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count) {
         return ErrorCode::NoError;
     }
     if (buffer_count < 4 + record_length) {
-        fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record: buffer too small for record "
+        fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record: buffer too small for record "
                         "(need %" PRIu32 "+4, have %" PRIu64 ") at call #%" PRIu64 "\n",
                 record_length, buffer_count, s_read_record_call_count);
         fflush(stderr);
@@ -111,7 +111,7 @@ ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count) {
 
     // log before the data fread for large records (potential hang point)
     if (record_length > 65000) {
-        fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record: about to read LARGE record data "
+        fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record: about to read LARGE record data "
                         "(%" PRIu32 " bytes) at call #%" PRIu64 ". "
                         ">>> If this is the last log, hang is in fread of large record data. <<<\n",
                 record_length - 4, s_read_record_call_count);
@@ -121,7 +121,7 @@ ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count) {
     read_length = fread(buffer + 4, 1, record_length - 4, in);
     buffer_count = 4 + read_length;
     if (read_length < record_length - 4) {
-        fprintf(stderr, "[V4D-GDS-DEBUG] gdsii_read_record: short data read %" PRIu64
+        fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record: short data read %" PRIu64
                         "/%" PRIu32 " bytes at call #%" PRIu64 ", eof=%d, ferror=%d\n",
                 read_length, record_length - 4, s_read_record_call_count, feof(in), ferror(in));
         fflush(stderr);
