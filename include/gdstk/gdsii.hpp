@@ -102,6 +102,9 @@ double gdsii_real_to_double(uint64_t real);
 // (including header) is returned in buffer_count.
 ErrorCode gdsii_read_record(FILE* in, uint8_t* buffer, uint64_t& buffer_count);
 
+// Set by read_gds to control debug output in gdsii_read_record
+extern bool g_gdsii_verbose;
+
 }  // namespace gdstk
 
 #endif

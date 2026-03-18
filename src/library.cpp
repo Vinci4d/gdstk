@@ -13,6 +13,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <zlib.h>
 
 #include <gdstk/allocator.hpp>
@@ -29,7 +30,7 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <gdstk/utils.hpp>
 #include <gdstk/vec.hpp>
 
-constexpr bool verbose = false;
+constexpr bool verbose_constexpr = false;
 
 namespace gdstk {
 
@@ -915,7 +916,7 @@ ErrorCode Library::write_oas(const char* filename, double circle_tolerance,
 }
 
 Library read_gds(const char* filename, double unit, double tolerance, const Set<Tag>* shape_tags,
-                 ErrorCode* error_code) {
+                 ErrorCode* error_code, bool verbose) {
     const char* gdsii_record_names[] = {
         "HEADER",    "BGNLIB",   "LIBNAME",   "UNITS",      "ENDLIB",      "BGNSTR",
         "STRNAME",   "ENDSTR",   "BOUNDARY",  "PATH",       "SREF",        "AREF",
@@ -927,6 +928,26 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
         "NODETYPE",  "PROPATTR", "PROPVALUE", "BOX",        "BOXTYPE",     "PLEX",
         "BGNEXTN",   "ENDEXTN",  "TAPENUM",   "TAPECODE",   "STRCLASS",    "RESERVED",
         "FORMAT",    "MASK",     "ENDMASKS",  "LIBDIRSIZE", "SRFNAME",     "LIBSECUR"};
+
+    g_gdsii_verbose = verbose;
+
+    struct timespec t_start, t_now;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+    auto elapsed_ms = [&t_start, &t_now]() -> double {
+        clock_gettime(CLOCK_MONOTONIC, &t_now);
+        return (t_now.tv_sec - t_start.tv_sec) * 1000.0 +
+               (t_now.tv_nsec - t_start.tv_nsec) / 1.0e6;
+    };
+
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-GDS] ========================================\n");
+        fprintf(stderr, "[V4D-DEBUG-GDS] read_gds called at +%.1fms\n", 0.0);
+        fprintf(stderr, "[V4D-DEBUG-GDS]   filename: <redacted> (length=%zu)\n",
+                filename ? strlen(filename) : 0);
+        fprintf(stderr, "[V4D-DEBUG-GDS]   unit: %g, tolerance: %g\n", unit, tolerance);
+        fprintf(stderr, "[V4D-DEBUG-GDS]   shape_tags filter: %s\n", shape_tags ? "YES" : "NO");
+        fflush(stderr);
+    }
 
     Library library = {};
     // One extra char in case we need a 0-terminated string with max count (should never happen, but
@@ -949,24 +970,101 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
     double width = 0;
     int16_t key = 0;
 
+    uint64_t record_count = 0;
+    uint64_t total_cells = 0;
+    uint64_t total_polygons = 0;
+    uint64_t total_paths = 0;
+    uint64_t total_references = 0;
+    uint64_t total_labels = 0;
+    uint64_t total_bytes_read = 0;
+
     FILE* in = fopen(filename, "rb");
     if (in == NULL) {
+        if (verbose) {
+            fprintf(stderr, "[V4D-DEBUG-GDS] FAILED to open file (name redacted)\n");
+            fflush(stderr);
+        }
         fputs("[GDSTK] Unable to open GDSII file for input.\n", stderr);
         if (error_code) *error_code = ErrorCode::InputFileOpenError;
         return library;
     }
 
+    // get file size for progress reporting
+    fseek(in, 0, SEEK_END);
+    long file_size = ftell(in);
+    fseek(in, 0, SEEK_SET);
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-GDS] File opened successfully, size: %ld bytes (%.2f MB). "
+                        ">>> If this is the last log, hang is before first record read. <<<\n",
+                file_size, file_size / (1024.0 * 1024.0));
+        fflush(stderr);
+    }
+
+    // Throttle strategy for multi-GB files:
+    //   - First 10 records: log each one individually (to capture file header/structure)
+    //   - After that: log progress every 10M records (~50 lines for a 5GB file)
+    //   - Cells: log first 5 + every 500th (catches start, samples the rest)
+    //   - Errors/completion: always logged
+    const uint64_t records_verbose_limit = 10;
+    const uint64_t progress_interval = 10000000;
+    const uint64_t cells_verbose_limit = 5;
+    const uint64_t cell_log_interval = 500;
+
     while (true) {
         uint64_t record_length = COUNT(buffer);
+        long file_pos_before = ftell(in);
         ErrorCode err = gdsii_read_record(in, buffer, record_length);
+        record_count++;
+        total_bytes_read += record_length;
+
         if (err != ErrorCode::NoError) {
+            if (verbose) {
+                fprintf(stderr, "[V4D-DEBUG-GDS] gdsii_read_record FAILED at +%.1fms\n", elapsed_ms());
+                fprintf(stderr, "[V4D-DEBUG-GDS]   record #%" PRIu64 ", file_pos: %ld/%ld (%.1f%%)\n",
+                        record_count, file_pos_before, file_size,
+                        file_size > 0 ? 100.0 * file_pos_before / file_size : 0.0);
+                fprintf(stderr, "[V4D-DEBUG-GDS]   error_code: %d\n", (int)err);
+                fflush(stderr);
+            }
             if (error_code) *error_code = err;
             break;
         }
 
-        // printf("0x%02X %s (%" PRIu64 " bytes)", buffer[2],
-        //        buffer[2] < COUNT(gdsii_record_names) ? gdsii_record_names[buffer[2]] : "",
-        //        record_length);
+        if (verbose && record_count % progress_interval == 0) {
+            long cur_pos = ftell(in);
+            fprintf(stderr,
+                    "[V4D-DEBUG-GDS] Progress: record #%" PRIu64 " at +%.1fms, "
+                    "file_pos: %ld/%ld (%.1f%%), "
+                    "cells=%" PRIu64 " polys=%" PRIu64 " paths=%" PRIu64
+                    " refs=%" PRIu64 " labels=%" PRIu64 ". "
+                    ">>> If this is the last log, hang is in processing records after this point. "
+                    "Next record will be #%" PRIu64 ". <<<\n",
+                    record_count, elapsed_ms(), cur_pos, file_size,
+                    file_size > 0 ? 100.0 * cur_pos / file_size : 0.0,
+                    total_cells, total_polygons, total_paths, total_references, total_labels,
+                    record_count + 1);
+            fflush(stderr);
+        }
+
+        const char* rec_name = (buffer[2] < COUNT(gdsii_record_names))
+                                   ? gdsii_record_names[buffer[2]]
+                                   : "UNKNOWN";
+
+        if (verbose && record_count <= records_verbose_limit) {
+            fprintf(stderr,
+                    "[V4D-DEBUG-GDS] rec #%" PRIu64 ": 0x%02X %s (%" PRIu64
+                    " bytes) at file_pos %ld. "
+                    ">>> If this is the last log, hang is processing record 0x%02X %s. <<<\n",
+                    record_count, buffer[2], rec_name, record_length, file_pos_before,
+                    buffer[2], rec_name);
+            if (record_count == records_verbose_limit) {
+                fprintf(stderr, "[V4D-DEBUG-GDS] --- Throttling: verbose per-record logging done. "
+                                "From here: progress every %" PRIu64 " records, "
+                                "cell info every %" PRIu64 " cells. ---\n",
+                                progress_interval, cell_log_interval);
+            }
+            fflush(stderr);
+        }
 
         uint64_t data_length;
         GdsiiDataType data_type = (GdsiiDataType)buffer[3];
@@ -975,37 +1073,46 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
             case GdsiiDataType::TwoByteSignedInteger:
                 data_length = (record_length - 4) / 2;
                 big_endian_swap16((uint16_t*)data16, data_length);
-                // for (uint32_t i = 0; i < data_length; i++) printf(" %" PRId16, data16[i]);
                 break;
             case GdsiiDataType::FourByteSignedInteger:
             case GdsiiDataType::FourByteReal:
                 data_length = (record_length - 4) / 4;
                 big_endian_swap32((uint32_t*)data32, data_length);
-                // for (uint32_t i = 0; i < data_length; i++) printf(" %" PRId32, data32[i]);
                 break;
             case GdsiiDataType::EightByteReal:
                 data_length = (record_length - 4) / 8;
                 big_endian_swap64(data64, data_length);
-                // for (uint32_t i = 0; i < data_length; i++)
-                // printf(" %" PRIu64 " (%g)", data64[i], gdsii_real_to_double(data64[i]));
                 break;
             default:
                 data_length = record_length - 4;
-                // for (uint32_t i = 0; i < data_length; i++) printf(" %c", str[i]);
         }
-
-        // putchar('\n');
 
         switch ((GdsiiRecord)(buffer[2])) {
             case GdsiiRecord::HEADER:
             case GdsiiRecord::BGNLIB:
+                break;
             case GdsiiRecord::ENDSTR:
+                if (verbose && cell && (total_cells <= cells_verbose_limit || total_cells % cell_log_interval == 0)) {
+                    fprintf(stderr,
+                            "[V4D-DEBUG-GDS] ENDSTR cell #%" PRIu64 " at +%.1fms: "
+                            "polygons=%" PRIu64 " flexpaths=%" PRIu64
+                            " refs=%" PRIu64 " labels=%" PRIu64 "\n",
+                            total_cells, elapsed_ms(),
+                            cell->polygon_array.count, cell->flexpath_array.count,
+                            cell->reference_array.count, cell->label_array.count);
+                    fflush(stderr);
+                }
                 break;
             case GdsiiRecord::LIBNAME:
                 if (str[data_length - 1] == 0) data_length--;
                 library.name = (char*)allocate(data_length + 1);
                 memcpy(library.name, str, data_length);
                 library.name[data_length] = 0;
+                if (verbose) {
+                    fprintf(stderr, "[V4D-DEBUG-GDS] LIBNAME: <redacted> (length=%" PRIu64 ") at +%.1fms\n",
+                            data_length, elapsed_ms());
+                    fflush(stderr);
+                }
                 break;
             case GdsiiRecord::UNITS: {
                 const double db_in_user = gdsii_real_to_double(data64[0]);
@@ -1021,13 +1128,46 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 if (tolerance <= 0) {
                     tolerance = library.precision / library.unit;
                 }
+                if (verbose) {
+                    fprintf(stderr,
+                            "[V4D-DEBUG-GDS] UNITS at +%.1fms: db_in_user=%g, db_in_meters=%g, "
+                            "factor=%g, library.unit=%g, library.precision=%g, tolerance=%g\n",
+                            elapsed_ms(), db_in_user, db_in_meters, factor,
+                            library.unit, library.precision, tolerance);
+                    fflush(stderr);
+                }
             } break;
             case GdsiiRecord::ENDLIB: {
+                if (verbose) {
+                    fprintf(stderr,
+                            "[V4D-DEBUG-GDS] ENDLIB at +%.1fms — about to resolve references. "
+                            ">>> If this is the last log, hang is in reference resolution. <<<\n",
+                            elapsed_ms());
+                    fprintf(stderr,
+                            "[V4D-DEBUG-GDS]   Total records: %" PRIu64
+                            ", cells: %" PRIu64 ", polygons: %" PRIu64
+                            ", paths: %" PRIu64 ", refs: %" PRIu64 ", labels: %" PRIu64 "\n",
+                            record_count, total_cells, total_polygons, total_paths,
+                            total_references, total_labels);
+                    fflush(stderr);
+                }
+
                 Map<Cell*> map = {};
                 uint64_t c_size = library.cell_array.count;
                 map.resize((uint64_t)(2.0 + 10.0 / GDSTK_MAP_CAPACITY_THRESHOLD * c_size));
                 Cell** c_item = library.cell_array.items;
                 for (uint64_t i = c_size; i > 0; i--, c_item++) map.set((*c_item)->name, *c_item);
+
+                if (verbose) {
+                    fprintf(stderr, "[V4D-DEBUG-GDS] Built cell map with %" PRIu64
+                                    " cells, about to resolve refs. "
+                                    ">>> If this is the last log, hang is in iterating cells to resolve references. <<<\n",
+                                    c_size);
+                    fflush(stderr);
+                }
+
+                uint64_t resolved_refs = 0;
+                uint64_t missing_refs = 0;
                 c_item = library.cell_array.items;
                 for (uint64_t i = c_size; i > 0; i--) {
                     cell = *c_item++;
@@ -1039,7 +1179,9 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                             free_allocation(reference->name);
                             reference->type = ReferenceType::Cell;
                             reference->cell = cp;
+                            resolved_refs++;
                         } else {
+                            missing_refs++;
                             if (error_code) *error_code = ErrorCode::MissingReference;
                             if (error_logger)
                                 fprintf(error_logger, "[GDSTK] Missing referenced cell %s\n",
@@ -1049,10 +1191,21 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 }
                 map.clear();
                 fclose(in);
+
+                if (verbose) {
+                    fprintf(stderr,
+                            "[V4D-DEBUG-GDS] read_gds COMPLETE at +%.1fms\n", elapsed_ms());
+                    fprintf(stderr,
+                            "[V4D-DEBUG-GDS]   resolved refs: %" PRIu64 ", missing refs: %" PRIu64 "\n",
+                            resolved_refs, missing_refs);
+                    fprintf(stderr, "[V4D-DEBUG-GDS] ========================================\n");
+                    fflush(stderr);
+                }
                 return library;
             } break;
             case GdsiiRecord::BGNSTR:
                 cell = (Cell*)allocate_clear(sizeof(Cell));
+                total_cells++;
                 break;
             case GdsiiRecord::STRNAME:
                 if (cell) {
@@ -1061,12 +1214,22 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                     memcpy(cell->name, str, data_length);
                     cell->name[data_length] = 0;
                     library.cell_array.append(cell);
+                    if (verbose && (total_cells <= cells_verbose_limit || total_cells % cell_log_interval == 0)) {
+                        fprintf(stderr,
+                                "[V4D-DEBUG-GDS] BGNSTR cell #%" PRIu64 " at +%.1fms "
+                                "(file_pos %ld, %.1f%%). "
+                                ">>> If this is the last log, hang is while parsing this cell's contents. <<<\n",
+                                total_cells, elapsed_ms(), ftell(in),
+                                file_size > 0 ? 100.0 * ftell(in) / file_size : 0.0);
+                        fflush(stderr);
+                    }
                 }
                 break;
             case GdsiiRecord::BOUNDARY:
             case GdsiiRecord::BOX:
                 polygon = (Polygon*)allocate_clear(sizeof(Polygon));
                 if (cell) cell->polygon_array.append(polygon);
+                total_polygons++;
                 break;
             case GdsiiRecord::PATH:
             case GdsiiRecord::RAITHMBMSPATH:
@@ -1075,6 +1238,7 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 path->elements = (FlexPathElement*)allocate_clear(sizeof(FlexPathElement));
                 path->simple_path = true;
                 if (cell) cell->flexpath_array.append(path);
+                total_paths++;
                 break;
             case GdsiiRecord::RAITHPXXDATA:
                 if (path) {
@@ -1088,11 +1252,13 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 reference = (Reference*)allocate_clear(sizeof(Reference));
                 reference->magnification = 1;
                 if (cell) cell->reference_array.append(reference);
+                total_references++;
                 break;
             case GdsiiRecord::TEXT:
                 label = (Label*)allocate_clear(sizeof(Label));
                 label->magnification = 1;
                 if (cell) cell->label_array.append(label);
+                total_labels++;
                 break;
             case GdsiiRecord::LAYER:
                 if (polygon) {
@@ -1142,6 +1308,14 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
                 break;
             case GdsiiRecord::XY:
                 if (polygon) {
+                    if (data_length / 2 > 10000) {
+                        fprintf(stderr,
+                                "[V4D-DEBUG-GDS] XY large polygon: %" PRIu64
+                                " points at rec #%" PRIu64 " +%.1fms. "
+                                ">>> If this is the last log, hang is in processing this large polygon's point data. <<<\n",
+                                data_length / 2, record_count, elapsed_ms());
+                        fflush(stderr);
+                    }
                     polygon->point_array.ensure_slots(data_length / 2);
                     double* d = (double*)(polygon->point_array.items + polygon->point_array.count);
                     int32_t* s = data32;
@@ -1377,14 +1551,64 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
         }
     }
 
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-GDS] read_gds EXITING VIA ERROR PATH at +%.1fms\n", elapsed_ms());
+        fprintf(stderr,
+                "[V4D-DEBUG-GDS]   records processed: %" PRIu64
+                ", cells: %" PRIu64 ", polygons: %" PRIu64
+                ", paths: %" PRIu64 ", refs: %" PRIu64 ", labels: %" PRIu64 "\n",
+                record_count, total_cells, total_polygons, total_paths,
+                total_references, total_labels);
+        fprintf(stderr, "[V4D-DEBUG-GDS]   last file_pos: %ld/%ld (%.1f%%)\n",
+                ftell(in), file_size,
+                file_size > 0 ? 100.0 * ftell(in) / file_size : 0.0);
+        fprintf(stderr, "[V4D-DEBUG-GDS]   freeing library and returning empty Library\n");
+        fprintf(stderr, "[V4D-DEBUG-GDS] ========================================\n");
+        fflush(stderr);
+    }
     library.free_all();
     fclose(in);
     return Library{};
 }
 
 // TODO: verify modal variables are correctly updated
-Library read_oas(const char* filename, double unit, double tolerance, ErrorCode* error_code) {
+Library read_oas(const char* filename, double unit, double tolerance, ErrorCode* error_code, bool verbose) {
     Library library = {};
+
+    struct timespec t_start_oas, t_now_oas;
+    clock_gettime(CLOCK_MONOTONIC, &t_start_oas);
+    auto elapsed_ms_oas = [&t_start_oas, &t_now_oas]() -> double {
+        clock_gettime(CLOCK_MONOTONIC, &t_now_oas);
+        return (t_now_oas.tv_sec - t_start_oas.tv_sec) * 1000.0 +
+               (t_now_oas.tv_nsec - t_start_oas.tv_nsec) / 1.0e6;
+    };
+
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-OAS] ========================================\n");
+        fprintf(stderr, "[V4D-DEBUG-OAS] read_oas called at +%.1fms\n", 0.0);
+        fprintf(stderr, "[V4D-DEBUG-OAS]   filename: <redacted> (length=%zu)\n",
+                filename ? strlen(filename) : 0);
+        fprintf(stderr, "[V4D-DEBUG-OAS]   unit: %g, tolerance: %g\n", unit, tolerance);
+        fflush(stderr);
+    }
+
+    uint64_t oas_record_count = 0;
+    uint64_t oas_total_cells = 0;
+    uint64_t oas_total_polygons = 0;
+    uint64_t oas_total_paths = 0;
+    uint64_t oas_total_references = 0;
+    uint64_t oas_total_labels = 0;
+    uint64_t oas_total_cblocks = 0;
+
+    // Throttle strategy for multi-GB files (same as read_gds):
+    //   - First 10 records: log individually
+    //   - After that: progress every 10M records
+    //   - Cells: first 5 + every 500th
+    //   - Errors/completion: always logged
+    const uint64_t oas_records_verbose_limit = 10;
+    const uint64_t oas_progress_interval = 10000000;
+    const uint64_t oas_cells_verbose_limit = 5;
+    const uint64_t oas_cell_log_interval = 500;
 
     //
     error_logger = stdout;
@@ -1392,29 +1616,61 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
     OasisStream in = {};
     in.file = fopen(filename, "rb");
     if (in.file == NULL) {
+        if (verbose) {
+            fprintf(stderr, "[V4D-DEBUG-OAS] FAILED to open file (name redacted)\n");
+            fflush(stderr);
+        }
         if (error_logger) fputs("[GDSTK] Unable to open OASIS file for input.\n", error_logger);
         if (error_code) *error_code = ErrorCode::InputFileOpenError;
         return library;
     }
 
+    fseek(in.file, 0, SEEK_END);
+    long oas_file_size = ftell(in.file);
+    fseek(in.file, 0, SEEK_SET);
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-OAS] File opened successfully, size: %ld bytes (%.2f MB). "
+                        ">>> If this is the last log, hang is before header check. <<<\n",
+                oas_file_size, oas_file_size / (1024.0 * 1024.0));
+        fflush(stderr);
+    }
+
     // Check header bytes and START record
     char header[14];
     if (fread(header, 1, 14, in.file) < 14 || memcmp(header, "%SEMI-OASIS\r\n\x01", 14) != 0) {
+        if (verbose) {
+            fprintf(stderr, "[V4D-DEBUG-OAS] Invalid OASIS header\n");
+            fflush(stderr);
+        }
         if (error_logger) fputs("[GDSTK] Invalid OASIS header found.\n", error_logger);
         if (error_code) *error_code = ErrorCode::InvalidFile;
         fclose(in.file);
         return library;
+    }
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-OAS] OASIS header valid at +%.1fms. "
+                        ">>> If this is the last log, hang is reading START record. <<<\n",
+                elapsed_ms_oas());
+        fflush(stderr);
     }
 
     // Process START record
     uint64_t len;
     uint8_t* version = oasis_read_string(in, false, len);
     if (in.error_code != ErrorCode::NoError) {
+        if (verbose) {
+            fprintf(stderr, "[V4D-DEBUG-OAS] Error reading START record version string\n");
+            fflush(stderr);
+        }
         if (error_code) *error_code = in.error_code;
         fclose(in.file);
         return library;
     }
     if (len != 3 || memcmp(version, "1.0", 3) != 0) {
+        if (verbose) {
+            fprintf(stderr, "[V4D-DEBUG-OAS] Unsupported OASIS version\n");
+            fflush(stderr);
+        }
         if (error_logger) fputs("[GDSTK] Unsupported OASIS file version.\n", error_logger);
         if (error_code) *error_code = ErrorCode::InvalidFile;
     }
@@ -1431,11 +1687,24 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
     if (tolerance <= 0) {
         tolerance = library.precision / library.unit;
     }
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-OAS] START record parsed at +%.1fms: "
+                        "factor=%g, library.unit=%g, library.precision=%g, tolerance=%g\n",
+                elapsed_ms_oas(), factor, library.unit, library.precision, tolerance);
+        fflush(stderr);
+    }
 
     uint64_t offset_table_flag = oasis_read_unsigned_integer(in);
     if (offset_table_flag == 0) {
         // Skip offset table
         for (uint8_t i = 12; i > 0; i--) oasis_read_unsigned_integer(in);
+    }
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-OAS] Offset table processed (flag=%" PRIu64 ") at +%.1fms. "
+                        "Entering main parse loop. "
+                        ">>> If this is the last log, hang is in first record read. <<<\n",
+                offset_table_flag, elapsed_ms_oas());
+        fflush(stderr);
     }
 
     // State variables
@@ -1515,14 +1784,54 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
 
     std::vector<int> record_counts(35,0);
 
+    static const char* oas_record_name_lookup[] = {
+        "PAD", "START", "END", "CELLNAME_IMPLICIT", "CELLNAME",
+        "TEXTSTRING_IMPLICIT", "TEXTSTRING", "PROPNAME_IMPLICIT", "PROPNAME",
+        "PROPSTRING_IMPLICIT", "PROPSTRING", "LAYERNAME_DATA", "LAYERNAME_TEXT",
+        "CELL_REF_NUM", "CELL", "XYABSOLUTE", "XYRELATIVE",
+        "PLACEMENT", "PLACEMENT_TRANSFORM", "TEXT", "RECTANGLE",
+        "POLYGON", "PATH", "TRAPEZOID_AB", "TRAPEZOID_A", "TRAPEZOID_B",
+        "CTRAPEZOID", "CIRCLE", "PROPERTY", "LAST_PROPERTY",
+        "XNAME_IMPLICIT", "XNAME", "XELEMENT", "XGEOMETRY", "CBLOCK"
+    };
+    auto oas_rec_name = [&](uint8_t r) -> const char* {
+        return r < 35 ? oas_record_name_lookup[r] : "UNKNOWN";
+    };
+
     OasisRecord record;
     while ((error_code == NULL || *error_code == ErrorCode::NoError) &&
            oasis_read(&record, 1, 1, in) == ErrorCode::NoError) {
-        // DEBUG_PRINT("Record [%02u] %s\n", (uint8_t)record,
-        //             (uint8_t)record < COUNT(oasis_record_names)
-        //                 ? oasis_record_names[(uint8_t)record]
-        //                 : "---");
+        oas_record_count++;
         record_counts[(int)record]++;
+
+        if (verbose) {
+            if (oas_record_count <= oas_records_verbose_limit) {
+                long cur_pos = (in.data != NULL) ? -1 : ftell(in.file);
+                fprintf(stderr, "[V4D-DEBUG-OAS] rec #%" PRIu64 ": 0x%02X %s at +%.1fms (fpos=%ld). "
+                                ">>> If this is the last log, hang is processing record 0x%02X %s. <<<\n",
+                        oas_record_count, (uint8_t)record, oas_rec_name((uint8_t)record),
+                        elapsed_ms_oas(), cur_pos, (uint8_t)record, oas_rec_name((uint8_t)record));
+                if (oas_record_count == oas_records_verbose_limit) {
+                    fprintf(stderr, "[V4D-DEBUG-OAS] --- Throttling: verbose per-record logging done. "
+                                    "From here: progress every %" PRIu64 " records, "
+                                    "cell info every %" PRIu64 " cells. ---\n",
+                            oas_progress_interval, oas_cell_log_interval);
+                }
+                fflush(stderr);
+            } else if (oas_record_count % oas_progress_interval == 0) {
+                long cur_pos = (in.data != NULL) ? -1 : ftell(in.file);
+                fprintf(stderr, "[V4D-DEBUG-OAS] progress: %" PRIu64 " records at +%.1fms, "
+                                "cells=%" PRIu64 " polys=%" PRIu64 " paths=%" PRIu64
+                                " refs=%" PRIu64 " labels=%" PRIu64 " cblocks=%" PRIu64
+                                " (fpos=%ld, %.1f%%). "
+                                ">>> If this is the last log, hang is in next batch of records. <<<\n",
+                        oas_record_count, elapsed_ms_oas(),
+                        oas_total_cells, oas_total_polygons, oas_total_paths,
+                        oas_total_references, oas_total_labels, oas_total_cblocks,
+                        cur_pos, oas_file_size > 0 ? 100.0 * cur_pos / oas_file_size : 0.0);
+                fflush(stderr);
+            }
+        }
         switch (record) {
             case OasisRecord::PAD:
                 break;
@@ -1534,6 +1843,16 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 if (error_code) *error_code = ErrorCode::InvalidFile;
                 break;
             case OasisRecord::END: {
+                if (verbose) {
+                    fprintf(stderr, "[V4D-DEBUG-OAS] END record reached at +%.1fms after %" PRIu64 " records. "
+                                    "cells=%" PRIu64 " polys=%" PRIu64 " paths=%" PRIu64
+                                    " refs=%" PRIu64 " labels=%" PRIu64 " cblocks=%" PRIu64 ". "
+                                    ">>> If this is the last log, hang is in post-parse reference resolution. <<<\n",
+                            elapsed_ms_oas(), oas_record_count,
+                            oas_total_cells, oas_total_polygons, oas_total_paths,
+                            oas_total_references, oas_total_labels, oas_total_cblocks);
+                    fflush(stderr);
+                }
                 FSEEK64(in.file, 0, SEEK_END);
                 library.name = (char*)allocate(4);
                 library.name[0] = 'L';
@@ -1632,6 +1951,12 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     property_value->bytes = (uint8_t*)allocate(prop_string->count);
                     memcpy(property_value->bytes, prop_string->bytes, prop_string->count);
                 }
+                if (verbose) {
+                    fprintf(stderr, "[V4D-DEBUG-OAS] Post-parse resolution complete at +%.1fms. "
+                                    ">>> If this is the last log, hang is in CLEANUP. <<<\n",
+                            elapsed_ms_oas());
+                    fflush(stderr);
+                }
                 goto CLEANUP;
             } break;
             case OasisRecord::CELLNAME_IMPLICIT: {
@@ -1708,7 +2033,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
             } break;
             case OasisRecord::LAYERNAME_DATA: {
                 uint8_t* bytes = oasis_read_string(in, false, len);
-                if constexpr(verbose) {
+                if constexpr(verbose_constexpr) {
                     std::string layer_name_data{(const char*)bytes, len};
                     printf("LAYERNAME_DATA: %s", layer_name_data.c_str());
                 }
@@ -1716,14 +2041,14 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 int data_type    = -1;
                 for (uint32_t i = 2; i > 0; i--) {
                     uint64_t type = oasis_read_unsigned_integer(in);
-                    if constexpr(verbose) printf("[type=%d: ", (int)type);
+                    if constexpr(verbose_constexpr) printf("[type=%d: ", (int)type);
                     if (type > 0) {
                         if (type == 4) {
                             uint64_t d = oasis_read_unsigned_integer(in);
-                            if constexpr(verbose) printf("%i,", (int)d);
+                            if constexpr(verbose_constexpr) printf("%i,", (int)d);
                         }
                         uint64_t u = oasis_read_unsigned_integer(in);
-                        if constexpr(verbose) printf("%i,", (int)u);
+                        if constexpr(verbose_constexpr) printf("%i,", (int)u);
                         if(i==1) {
                             data_type = int(u);
                         } else
@@ -1731,12 +2056,12 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                             layer_number = int(u);
                         }
                     }
-                    if constexpr(verbose) printf("]");
+                    if constexpr(verbose_constexpr) printf("]");
                 }
-                if constexpr(verbose) printf("\n");
+                if constexpr(verbose_constexpr) printf("\n");
                 std::string layer_name{(const char*)bytes, len};
                 library.tag_to_layername[make_tag(layer_number, data_type)] = layer_name;
-                if constexpr(verbose) {
+                if constexpr(verbose_constexpr) {
                     printf("layer_name = %s, layer_number = %d\n", layer_name.c_str(), layer_number);
                 }
                 free_allocation(bytes);
@@ -1744,25 +2069,25 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
             case OasisRecord::LAYERNAME_TEXT: {
                 // Unused record
                 uint8_t * bytes = oasis_read_string(in, false, len);
-                if constexpr(verbose) {
+                if constexpr(verbose_constexpr) {
                     std::string layer_name_text{(const char*)bytes, len};
                     printf("LAYERNAME_TEXT: %s",layer_name_text.c_str());
                 }
                 free_allocation(bytes);
                 for (uint32_t i = 2; i > 0; i--) {
                     uint64_t type = oasis_read_unsigned_integer(in);
-                    if constexpr(verbose) printf("[type=%d: ", (int)type);
+                    if constexpr(verbose_constexpr) printf("[type=%d: ", (int)type);
                     if (type > 0) {
                         if (type == 4) {
                             uint64_t d = oasis_read_unsigned_integer(in);
-                            if constexpr(verbose) printf("%i,", (int)d);
+                            if constexpr(verbose_constexpr) printf("%i,", (int)d);
                         }
                         uint d = oasis_read_unsigned_integer(in);
-                        if constexpr(verbose) printf("%i,", (int)d);
+                        if constexpr(verbose_constexpr) printf("%i,", (int)d);
                     }
-                    if constexpr(verbose) printf("]");
+                    if constexpr(verbose_constexpr) printf("]");
                 }
-                if constexpr(verbose) printf("\n");
+                if constexpr(verbose_constexpr) printf("\n");
             }   break;
             case OasisRecord::CELL_REF_NUM:
             case OasisRecord::CELL: {
@@ -1770,10 +2095,26 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 library.cell_array.append(cell);
                 next_property = &cell->properties;
                 if (record == OasisRecord::CELL_REF_NUM) {
-                    // Use owner as temporary storage for the reference number
                     cell->owner = (void*)oasis_read_unsigned_integer(in);
                 } else {
                     cell->name = (char*)oasis_read_string(in, true, len);
+                }
+                oas_total_cells++;
+                if (verbose && (oas_total_cells <= oas_cells_verbose_limit ||
+                    oas_total_cells % oas_cell_log_interval == 0)) {
+                    long cur_pos = (in.data != NULL) ? -1 : ftell(in.file);
+                    fprintf(stderr, "[V4D-DEBUG-OAS] CELL #%" PRIu64 " (%s) at +%.1fms, "
+                                    "rec=%" PRIu64 " (fpos=%ld, %.1f%%). "
+                                    ">>> If this is the last log, hang is parsing this cell's contents. <<<\n",
+                            oas_total_cells,
+                            record == OasisRecord::CELL_REF_NUM ? "by-ref" : "by-name",
+                            elapsed_ms_oas(), oas_record_count,
+                            cur_pos, oas_file_size > 0 ? 100.0 * cur_pos / oas_file_size : 0.0);
+                    if (oas_total_cells == oas_cells_verbose_limit) {
+                        fprintf(stderr, "[V4D-DEBUG-OAS] --- Cell throttle: next cell log at #%" PRIu64 " ---\n",
+                                oas_cell_log_interval);
+                    }
+                    fflush(stderr);
                 }
                 modal_absolute_pos = true;
                 modal_placement_pos = Vec2{0, 0};
@@ -1788,6 +2129,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 break;
             case OasisRecord::PLACEMENT:
             case OasisRecord::PLACEMENT_TRANSFORM: {
+                oas_total_references++;
                 Reference* reference = (Reference*)allocate_clear(sizeof(Reference));
                 cell->reference_array.append(reference);
                 next_property = &reference->properties;
@@ -1861,6 +2203,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
             } break;
             case OasisRecord::TEXT: {
+                oas_total_labels++;
                 Label* label = (Label*)allocate_clear(sizeof(Label));
                 label->magnification = 1;
                 label->anchor = Anchor::SW;
@@ -1916,6 +2259,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
             } break;
             case OasisRecord::RECTANGLE: {
+                oas_total_polygons++;
                 Polygon* polygon = (Polygon*)allocate_clear(sizeof(Polygon));
                 cell->polygon_array.append(polygon);
                 next_property = &polygon->properties;
@@ -1963,6 +2307,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
             } break;
             case OasisRecord::POLYGON: {
+                oas_total_polygons++;
                 Polygon* polygon = (Polygon*)allocate_clear(sizeof(Polygon));
                 cell->polygon_array.append(polygon);
                 next_property = &polygon->properties;
@@ -2011,6 +2356,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
             } break;
             case OasisRecord::PATH: {
+                oas_total_paths++;
                 FlexPath* path = (FlexPath*)allocate_clear(sizeof(FlexPath));
                 FlexPathElement* element =
                     (FlexPathElement*)allocate_clear(sizeof(FlexPathElement));
@@ -2566,6 +2912,16 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 if (error_code) *error_code = ErrorCode::UnsupportedRecord;
             } break;
             case OasisRecord::CBLOCK: {
+                oas_total_cblocks++;
+                if (verbose && (oas_total_cblocks <= 5 || oas_total_cblocks % 1000 == 0)) {
+                    long cur_pos = (in.data != NULL) ? -1 : ftell(in.file);
+                    fprintf(stderr, "[V4D-DEBUG-OAS] CBLOCK #%" PRIu64 " at +%.1fms "
+                                    "(fpos=%ld, %.1f%%). "
+                                    ">>> If this is the last log, hang is decompressing CBLOCK. <<<\n",
+                            oas_total_cblocks, elapsed_ms_oas(),
+                            cur_pos, oas_file_size > 0 ? 100.0 * cur_pos / oas_file_size : 0.0);
+                    fflush(stderr);
+                }
                 if (oasis_read_unsigned_integer(in) != 0) {
                     if (error_logger)
                         fputs("[GDSTK] CBLOCK compression method not supported.\n", error_logger);
@@ -2619,12 +2975,35 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
         }
     }
     if (in.error_code != ErrorCode::NoError && error_code) *error_code = in.error_code;
-
+    if (verbose && in.error_code != ErrorCode::NoError) {
+        fprintf(stderr, "[V4D-DEBUG-OAS] Loop exited with stream error %d at +%.1fms, "
+                        "records=%" PRIu64 "\n",
+                (int)in.error_code, elapsed_ms_oas(), oas_record_count);
+        fflush(stderr);
+    }
 
 CLEANUP:
     fclose(in.file);
 
-    if constexpr(verbose) {
+    if (verbose) {
+        fprintf(stderr, "[V4D-DEBUG-OAS] ========================================\n");
+        fprintf(stderr, "[V4D-DEBUG-OAS] read_oas COMPLETE at +%.1fms\n", elapsed_ms_oas());
+        fprintf(stderr, "[V4D-DEBUG-OAS]   total records: %" PRIu64 "\n", oas_record_count);
+        fprintf(stderr, "[V4D-DEBUG-OAS]   cells: %" PRIu64 ", polygons: %" PRIu64
+                        ", paths: %" PRIu64 ", refs: %" PRIu64
+                        ", labels: %" PRIu64 ", cblocks: %" PRIu64 "\n",
+                oas_total_cells, oas_total_polygons, oas_total_paths,
+                oas_total_references, oas_total_labels, oas_total_cblocks);
+        fprintf(stderr, "[V4D-DEBUG-OAS]   library cells in array: %" PRIu64 "\n",
+                library.cell_array.count);
+        if (error_code) {
+            fprintf(stderr, "[V4D-DEBUG-OAS]   error_code: %d\n", (int)*error_code);
+        }
+        fprintf(stderr, "[V4D-DEBUG-OAS] ========================================\n");
+        fflush(stderr);
+    }
+
+    if constexpr(verbose_constexpr) {
         const std::vector<std::string> record_names = {
             "PAD",                  //  0
             "START",                //  1

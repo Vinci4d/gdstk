@@ -172,7 +172,7 @@ struct LibraryInfo {
 // tags will be imported.  If not NULL, any errors will be reported through
 // error_code.
 Library read_gds(const char* filename, double unit, double tolerance, const Set<Tag>* shape_tags,
-                 ErrorCode* error_code);
+                 ErrorCode* error_code, bool verbose = false);
 
 // Read the contents of an OASIS file into a new library.  If unit is not zero,
 // the units in the file are converted (all elements are properly scaled to the
@@ -182,7 +182,7 @@ Library read_gds(const char* filename, double unit, double tolerance, const Set<
 // will be reported through error_code.
 Library read_oas(const char* filename, double unit,
                  double tolerance,  // TODO: const Set<Tag>* shape_tags,
-                 ErrorCode* error_code);
+                 ErrorCode* error_code, bool verbose = false);
 
 // Read the unit and precision of a GDSII file and return in the respective
 // arguments.
