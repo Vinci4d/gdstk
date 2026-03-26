@@ -16,6 +16,8 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <time.h>
 #include <zlib.h>
 
+#include <unordered_set>
+
 #include <gdstk/allocator.hpp>
 #include <gdstk/cell.hpp>
 #include <gdstk/flexpath.hpp>
@@ -1733,8 +1735,8 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
 
     Property** next_property = &library.properties;
 
-    Array<Property*> unfinished_property_name = {};
-    Array<PropertyValue*> unfinished_property_value = {};
+    std::unordered_set<Property*> unfinished_property_name;
+    std::unordered_set<PropertyValue*> unfinished_property_value;
     bool modal_property_unfinished = false;
 
     // Name tables
@@ -1823,11 +1825,13 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 fprintf(stderr, "[V4D-DEBUG-OAS] progress: %" PRIu64 " records at +%.1fms, "
                                 "cells=%" PRIu64 " polys=%" PRIu64 " paths=%" PRIu64
                                 " refs=%" PRIu64 " labels=%" PRIu64 " cblocks=%" PRIu64
+                                " unfin_pval=%zu unfin_pname=%zu"
                                 " (fpos=%ld, %.1f%%). "
                                 ">>> If this is the last log, hang is in next batch of records. <<<\n",
                         oas_record_count, elapsed_ms_oas(),
                         oas_total_cells, oas_total_polygons, oas_total_paths,
                         oas_total_references, oas_total_labels, oas_total_cblocks,
+                        unfinished_property_value.size(), unfinished_property_name.size(),
                         cur_pos, oas_file_size > 0 ? 100.0 * cur_pos / oas_file_size : 0.0);
                 fflush(stderr);
             }
@@ -1935,15 +1939,11 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                 }
                 map.clear();
 
-                Property** prop_p = unfinished_property_name.items;
-                for (uint64_t i = unfinished_property_name.count; i > 0; i--) {
-                    Property* property = *prop_p++;
+                for (Property* property : unfinished_property_name) {
                     ByteArray* prop_name = property_name_table.items + (uint64_t)property->name;
                     property->name = copy_string((char*)prop_name->bytes, NULL);
                 }
-                PropertyValue** prop_value_p = unfinished_property_value.items;
-                for (uint64_t i = unfinished_property_value.count; i > 0; i--) {
-                    PropertyValue* property_value = *prop_value_p++;
+                for (PropertyValue* property_value : unfinished_property_value) {
                     ByteArray* prop_string =
                         property_value_table.items + (uint64_t)property_value->unsigned_integer;
                     property_value->type = PropertyType::String;
@@ -2777,7 +2777,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     if (info & 0x02) {
                         // Reference number
                         property->name = (char*)oasis_read_unsigned_integer(in);
-                        unfinished_property_name.append(property);
+                        unfinished_property_name.insert(property);
                         modal_property_unfinished = true;
                     } else {
                         property->name = (char*)oasis_read_string(in, true, len);
@@ -2788,7 +2788,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     // Use modal variable
                     if (modal_property_unfinished) {
                         property->name = modal_property->name;
-                        unfinished_property_name.append(property);
+                        unfinished_property_name.insert(property);
                     } else {
                         property->name = copy_string(modal_property->name, NULL);
                     }
@@ -2800,8 +2800,8 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                     PropertyValue* dst = property->value;
                     while (src) {
                         if (src->type == PropertyType::UnsignedInteger &&
-                            unfinished_property_value.contains(src)) {
-                            unfinished_property_value.append(dst);
+                            unfinished_property_value.count(src)) {
+                            unfinished_property_value.insert(dst);
                         }
                         src = src->next;
                         dst = dst->next;
@@ -2852,7 +2852,7 @@ Library read_oas(const char* filename, double unit, double tolerance, ErrorCode*
                             case OasisDataType::ReferenceN: {
                                 property_value->type = PropertyType::UnsignedInteger;
                                 property_value->unsigned_integer = oasis_read_unsigned_integer(in);
-                                unfinished_property_value.append(property_value);
+                                unfinished_property_value.insert(property_value);
                             } break;
                         }
                     }
